@@ -1,5 +1,7 @@
 # TriangleAgencyAssistingTool
 
+## 简介
+
 软件按游戏中的两个身份分为两个界面，功能如下：
 - GM
     - 启动服务器
@@ -19,6 +21,14 @@
 推荐使用[gsocket](https://github.com/hackerschoice/gsocket)实现联机（我怎么现在才发现这个好东西），但任何端口转发服务配置好后都能用
 
 游戏的相关文本来源于网络
+
+## 下载与使用
+
+如果有python和pyside6库的话直接运行`app.py`即可
+
+releases文件夹下有macOS（m1）和windows 10下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行（不知道怎么发大文件release只能用`git lfs`的废物）
+
+软件会在安装目录下创建一个`data`文件夹，用于存储角色卡等数据
 
 ## 后记
 
