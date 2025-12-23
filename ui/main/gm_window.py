@@ -117,7 +117,7 @@ class GMMainWindow(QMainWindow):
     def __init__(self, game_name):
         super().__init__()
         self.game_name = game_name
-        self.setWindowTitle(f"TRPG Assistant - GM Control - {game_name}")
+        self.setWindowTitle(f"TA Assistant - GM Control - {game_name}")
         self.resize(1400, 900)
         
         self.server = GMServer()

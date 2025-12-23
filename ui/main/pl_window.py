@@ -22,7 +22,7 @@ class PLMainWindow(QMainWindow):
     def __init__(self, game_name):
         super().__init__()
         self.game_name = game_name
-        self.setWindowTitle(f"TRPG Assistant - PL - {game_name}")
+        self.setWindowTitle(f"TA Assistant - PL - {game_name}")
         self.resize(1200, 800)
 
         self.game_dir = Path("data") / "PL" / self.game_name
@@ -198,7 +198,7 @@ class PLMainWindow(QMainWindow):
         last_ip = settings.value("last_ip", "localhost")
         last_port = settings.value("last_port", 12345)
         use_gs = settings.value("use_gs", "false") == "true"
-        gs_cmd_template = settings.value("gs_cmd", "gs-netcat -s TriangleAgency gsocket {port}")
+        gs_cmd_template = settings.value("gs_cmd", "gs-netcat -s TriangleAgency -p {port}")
 
         dialog = QDialog(self)
         dialog.setWindowTitle("连接服务器")
@@ -413,16 +413,10 @@ class PLMainWindow(QMainWindow):
         self.chaos_spin.setValue(current + growth_value)
         self.client.send("chaos", growth_value)
 
-    # === 新增方法：处理掷骰日志并广播 ===
     def handle_dice_log(self, html_content):
         name = self.character_data.get("name", "Unknown PL")
-        # 加上名字头，并作为完整日志发送
         full_log = f"<div style='border-left: 4px solid #0055AA; padding-left: 5px; margin: 5px 0;'><b>{name}</b> 进行了掷骰:<br>{html_content}</div>"
-        
-        # 本地显示
         self.append_log(full_log)
-        
-        # 发送到服务器进行广播
         self.client.send("log", full_log)
 
     def open_character_editor(self):
@@ -437,8 +431,7 @@ class PLMainWindow(QMainWindow):
         
         dialog = DiceTool(self.game_name, self.character_data, self)
         dialog.dataChanged.connect(self.save_character)
-        
-        # === 修改连接：连接到广播方法，而不仅仅是本地显示 ===
+
         dialog.log_signal.connect(self.handle_dice_log)
         
         dialog.chaosSignal.connect(self.handle_dice_chaos) 

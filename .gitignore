@@ -3,3 +3,6 @@
 data
 test*
 __pycache__
+app.spec
+build
+dist

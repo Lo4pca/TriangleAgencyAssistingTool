@@ -30,9 +30,8 @@ def main():
             
         game_name = game_dialog.selected_game
         if not game_name:
-            continue # 理论上 on_confirm 会拦截，但双保险
+            continue
 
-        # 3. 启动主窗口
         main_window = None
         if role == "PL":
             main_window = PLMainWindow(game_name)
