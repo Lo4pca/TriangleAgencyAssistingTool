@@ -23,6 +23,8 @@ from ui.character.tabs.relationships import RelationshipsTab
 from ui.character.tabs.custom_tracks import CustomTracksTab
 from ui.common.styles import GLOBAL_STYLE_SHEET
 
+from ui.tools.weather_tool import WeatherTool
+
 class DragDropEditor(QTextEdit):
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -253,6 +255,10 @@ class GMMainWindow(QMainWindow):
         self.btn_server.clicked.connect(self.toggle_server)
         h_layout.addWidget(self.btn_server)
         top_layout.addLayout(h_layout)
+
+        weather_btn = QPushButton("松散端与天气")
+        weather_btn.clicked.connect(self.open_weather_tool)
+        top_layout.addWidget(weather_btn)
         
         top_layout.addWidget(QLabel("在线玩家 (双击查看):"))
         self.pl_list = QListWidget()
@@ -497,6 +503,20 @@ class GMMainWindow(QMainWindow):
                 self.pf_process = None
             except Exception as e:
                 self.log_system(f"关闭外部进程出错: {e}")
+    
+    def open_weather_tool(self):
+        self.weather_tool = WeatherTool(self.game_name, self)
+        self.weather_tool.broadcast_signal.connect(self.broadcast_weather_log)
+        self.weather_tool.local_log_signal.connect(self.append_log)
+        self.weather_tool.loose_ends_signal.connect(self.broadcast_loose_ends)
+        self.weather_tool.show()
+
+    def broadcast_weather_log(self, html_content):
+        self.append_log(f"<span style='color:blue'>[已广播天气日志]</span><br>")
+        self.server.send_to_all("log", html_content)
+    
+    def broadcast_loose_ends(self, val):
+        self.server.send_to_all("loose_ends", val)
     
     def closeEvent(self, event):
         self.stop_port_forwarding()

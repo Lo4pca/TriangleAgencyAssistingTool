@@ -10,6 +10,7 @@
     - 笔记
     - 查看PL的角色卡
     - 游戏日志
+    - 管理松散端与天气事件
 - PL
     - 角色卡编辑器
     - 掷骰工具
@@ -29,6 +30,18 @@
 releases文件夹下有macOS（m1）和windows 10下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行（不知道怎么发大文件release只能用`git lfs`的废物）
 
 软件会在安装目录下创建一个`data`文件夹，用于存储角色卡等数据
+
+由于`git lfs`追踪文件耗时较长，我不会每次修改代码时都打包一份软件。目前releases下的软件版本停留在`v0.0.1`,相比于直接运行`app.py`（`v0.0.2`）缺少了如下内容：
+- 松散端管理与天气事件（d20掷骰）
+- 对“多人联机时混沌值统计出错”的修复
+
+## 更改日志
+
+### v0.0.2
+
+- 增加松散端计数与针对天气事件的掷骰
+- 修复“多人联机时混沌值统计出错”的问题
+- 详细内容： https://github.com/Lo4pca/TriangleAgencyAssistingTool/issues/1#issuecomment-3698372854
 
 ## 后记
 

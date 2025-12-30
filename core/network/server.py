@@ -1,6 +1,6 @@
 import struct
 from PySide6.QtNetwork import QTcpServer, QHostAddress, QTcpSocket, QAbstractSocket
-from PySide6.QtCore import QObject, Signal, QTimer
+from PySide6.QtCore import QObject, Signal
 from .protocol import unpack_msg, pack_msg, HEADER_SIZE, MsgType
 
 class GMServer(QObject):
@@ -93,7 +93,6 @@ class GMServer(QObject):
 
         if m_type == MsgType.CHAOS_SYNC:
             self.chaos_received.emit(data)
-            self.broadcast(MsgType.CHAOS_SYNC, data, exclude=sender_socket)
             
         elif m_type == MsgType.LOG_SYNC:
             self.log_received.emit(data)

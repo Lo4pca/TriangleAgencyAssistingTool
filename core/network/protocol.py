@@ -7,6 +7,7 @@ class MsgType(str, Enum):
     LOG_SYNC = "log"            # 同步日志文本
     SHEET_UPDATE = "sheet"      # PL 推送角色卡给 GM
     FILE_SEND = "file"          # GM 发送文件给 PL
+    LOOSE_ENDS = "loose_ends"
 
 HEADER_SIZE = 4 
 

@@ -56,6 +56,8 @@ class PLMainWindow(QMainWindow):
         self.client.chaos_updated.connect(self.on_server_chaos_sync)
         self.client.log_updated.connect(self.append_log)
         self.client.file_received.connect(self.on_file_received)
+        self.client.loose_ends_updated.connect(self.on_loose_ends_sync)
+
         self.client.connected.connect(self.on_connected_success)
         self.client.disconnected.connect(self.on_disconnected)
         self.client.error_occurred.connect(self.on_connection_error)
@@ -74,6 +76,9 @@ class PLMainWindow(QMainWindow):
         self.chaos_spin.blockSignals(True)
         self.chaos_spin.setValue(absolute_val)
         self.chaos_spin.blockSignals(False)
+    
+    def on_loose_ends_sync(self, val):
+        self.le_display.setText(str(val))
     
     def save_file(self,fname,content):
         download_dir = Path("data") / "PL" / self.game_name / "downloads"
@@ -331,8 +336,22 @@ class PLMainWindow(QMainWindow):
         toolbar_layout.addWidget(self.conn_status_lbl)
         toolbar_layout.addWidget(self.disconnect_btn)
         toolbar_layout.addSpacing(10)
-        
+
+        prep_btn = QPushButton("重置状态")
+        prep_btn.setToolTip("恢复所有 QA 至上限并清空燃尽")
+        prep_btn.clicked.connect(self.do_mission_prep)
+        toolbar_layout.addWidget(prep_btn)
         toolbar_layout.addStretch()
+
+        le_lbl = QLabel("松散端:")
+        le_lbl.setStyleSheet("color: #AAAAAA; font-weight: bold;")
+        
+        self.le_display = QLabel("0")
+        self.le_display.setStyleSheet("color: #FFD700; font-weight: bold; font-size: 11pt; border: 1px solid #555; padding: 2px 6px; border-radius: 4px;")
+        
+        toolbar_layout.addWidget(le_lbl)
+        toolbar_layout.addWidget(self.le_display)
+        toolbar_layout.addSpacing(15)
         
         chaos_lbl = QLabel("混沌:")
         chaos_lbl.setStyleSheet("color: #FF5555; font-weight: bold;")
@@ -383,6 +402,22 @@ class PLMainWindow(QMainWindow):
         self.notes_dock.setWidget(notes_container)
         self.addDockWidget(Qt.RightDockWidgetArea, self.notes_dock)
         self.view_menu.addAction(self.notes_dock.toggleViewAction())
+    
+    def do_mission_prep(self):
+        reply = QMessageBox.question(
+            self, "确认准备", 
+            "这将把所有 QA 恢复到最大值，\n并清零'额外燃尽'。\n是否继续？",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.No: return
+
+        qas = self.character_data["quality_assurances"]
+        for key in qas:
+            qas[key]["current"] = qas[key]["max"]
+        self.character_data["additional_burnout"] = 0
+
+        self.save_character()
+        self.append_log("<i>已回满QA并清空燃尽</i>")
     
     def open_local_link(self, url):
         if not self.render_file(url):
