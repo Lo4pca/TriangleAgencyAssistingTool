@@ -9,6 +9,7 @@ class GMServer(QObject):
     sheet_received = Signal(str, str, dict)
     player_connected = Signal(str, str)
     player_disconnected = Signal(str)
+    mission_report_received = Signal(str, dict)
 
     def __init__(self, port=12345):
         super().__init__()
@@ -103,6 +104,9 @@ class GMServer(QObject):
             sheet_content = data.get("sheet", {})
             self.clients[sender_socket]["name"] = new_name
             self.sheet_received.emit(sender_uid, new_name, sheet_content)
+        
+        elif m_type == MsgType.MISSION_REPORT:
+            self.mission_report_received.emit(sender_uid, data)
     
     def broadcast(self, msg_type, data, exclude=None):
         payload = pack_msg(msg_type, data)

@@ -8,6 +8,7 @@ class MsgType(str, Enum):
     SHEET_UPDATE = "sheet"      # PL 推送角色卡给 GM
     FILE_SEND = "file"          # GM 发送文件给 PL
     LOOSE_ENDS = "loose_ends"
+    MISSION_REPORT = "mission_report"
 
 HEADER_SIZE = 4 
 

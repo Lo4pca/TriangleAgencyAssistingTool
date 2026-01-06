@@ -2,7 +2,8 @@ import random
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QComboBox, QMessageBox, QFrame,
-    QGridLayout, QInputDialog, QWidget, QSpinBox
+    QGridLayout, QInputDialog, QWidget, QSpinBox,
+    QTabWidget, QTextEdit
 )
 from PySide6.QtCore import Qt, Signal
 
@@ -108,30 +109,50 @@ class DiceTool(QDialog):
     def __init__(self, game_name, character_data, parent=None):
         super().__init__(parent)
         self.game_name = game_name
-        self.data = character_data
+        self.data = character_data if character_data else {}
         self.setWindowTitle("掷骰工具")
-        self.resize(500, 700)
-        
+        self.resize(550, 750)
+
         self.current_rolls = [0] * 6
         self.unused_burnout = 0
         self.is_triscendence = False 
-
         self.pending_log = False
         self.roll_history = {}
         
         self.init_ui()
 
     def init_ui(self):
-        layout = QVBoxLayout(self)
+        main_layout = QVBoxLayout(self)
+
+        self.tabs = QTabWidget()
+        main_layout.addWidget(self.tabs)
+
+        self.agency_tab = QWidget()
+        self.init_agency_tab(self.agency_tab)
+        
+        tab1_name = "机构掷骰"
+        if not self.data:
+            tab1_name += " (无角色数据)"
+        self.tabs.addTab(self.agency_tab, tab1_name)
+
+        self.custom_tab = QWidget()
+        self.init_custom_tab(self.custom_tab)
+        self.tabs.addTab(self.custom_tab, "自定义掷骰")
+
+        if not self.data:
+            self.tabs.setCurrentIndex(1)
+
+    def init_agency_tab(self, parent_widget):
+        layout = QVBoxLayout(parent_widget)
         layout.setSpacing(15)
-        layout.setContentsMargins(20, 20, 20, 20)
+        layout.setContentsMargins(10, 10, 10, 10)
 
         self._init_settings(layout)
         self._init_dice(layout)
         self._init_results(layout)
-
+        
         self.update_burnout_display()
-
+    
     def _init_results(self, parent_layout):
         self.result_frame = QFrame()
         self.result_frame.setStyleSheet("border: 1px solid #CCCCCC; border-radius: 8px; background-color: #FAFAFA;")
@@ -253,7 +274,7 @@ class DiceTool(QDialog):
             btn.update_state(val, is_burned)
 
     def roll_dice(self):
-        self.commit_log()
+        self.commit_log() # 如果有未提交的先提交
         
         key, val = self.get_current_qa()
         base_burn = self.data.get("additional_burnout", 0)
@@ -319,6 +340,9 @@ class DiceTool(QDialog):
         self.roll_history["chaos_growth"] = chaos_growth
 
     def on_die_clicked(self, index):
+        if not self.data:
+            return
+
         val = self.current_rolls[index]
         if (val == 3 and not self.dice_buttons[index].is_burned) or self.dice_buttons[index].value==0: return
 
@@ -423,6 +447,106 @@ class DiceTool(QDialog):
                 
             self.pending_log = False
             self.roll_history = {}
+    
+    def init_custom_tab(self, parent_widget):
+        layout = QVBoxLayout(parent_widget)
+        layout.setSpacing(15)
+        layout.setContentsMargins(20, 20, 20, 20)
+
+        quick_layout = QGridLayout()
+        quick_dice = [
+            (4, "d4"), (6, "d6"), (8, "d8"), (10, "d10"), 
+            (12, "d12"), (20, "d20"), (100, "d100")
+        ]
+        
+        layout.addWidget(QLabel("快速投掷:"))
+        
+        row, col = 0, 0
+        for faces, label in quick_dice:
+            btn = QPushButton(label)
+            btn.setMinimumHeight(40)
+            btn.clicked.connect(lambda _, f=faces: self.set_custom_dice(1, f))
+            quick_layout.addWidget(btn, row, col)
+            col += 1
+            if col > 3:
+                col = 0
+                row += 1
+        layout.addLayout(quick_layout)
+        
+        layout.addSpacing(10)
+        layout.addWidget(QFrame(frameShape=QFrame.HLine))
+        layout.addSpacing(10)
+
+        custom_form = QHBoxLayout()
+        
+        self.custom_count = QSpinBox()
+        self.custom_count.setRange(1, 100)
+        self.custom_count.setValue(1)
+        self.custom_count.setPrefix("数量: ")
+        self.custom_count.setStyleSheet("font-size: 12pt;")
+        
+        self.custom_faces = QSpinBox()
+        self.custom_faces.setRange(2, 1000)
+        self.custom_faces.setValue(20)
+        self.custom_faces.setPrefix("面数: d")
+        self.custom_faces.setStyleSheet("font-size: 12pt;")
+        
+        custom_form.addWidget(self.custom_count)
+        custom_form.addWidget(self.custom_faces)
+        
+        layout.addLayout(custom_form)
+
+        self.custom_roll_btn = QPushButton("投掷自定义骰子")
+        self.custom_roll_btn.setMinimumHeight(50)
+        self.custom_roll_btn.setStyleSheet("background-color: #6A1B9A; color: white; font-weight: bold; font-size: 14pt; border-radius: 8px;")
+        self.custom_roll_btn.clicked.connect(self.roll_custom)
+        layout.addWidget(self.custom_roll_btn)
+
+        layout.addWidget(QLabel("结果预览:"))
+        self.custom_result_display = QTextEdit()
+        self.custom_result_display.setReadOnly(True)
+        self.custom_result_display.setStyleSheet("font-size: 11pt;")
+        layout.addWidget(self.custom_result_display)
+
+        self.custom_send_btn = QPushButton("发送结果到个人日志")
+        self.custom_send_btn.setMinimumHeight(40)
+        self.custom_send_btn.setEnabled(False)
+        self.custom_send_btn.clicked.connect(self.send_custom_log)
+        layout.addWidget(self.custom_send_btn)
+
+    def set_custom_dice(self, count, faces):
+        self.custom_count.setValue(count)
+        self.custom_faces.setValue(faces)
+        self.roll_custom()
+
+    def roll_custom(self):
+        count = self.custom_count.value()
+        faces = self.custom_faces.value()
+        
+        rolls = [random.randint(1, faces) for _ in range(count)]
+        total = sum(rolls)
+
+        rolls_str = ", ".join(map(str, rolls))
+        
+        html_inner = f"""
+        <div style='font-size: 1.1em;'>
+            投掷 <b>{count}d{faces}</b>:<br>
+            结果: [{rolls_str}]<br>
+            <hr>
+            总计: <b style='font-size:1.4em;'>{total}</b>
+        </div>
+        """
+        
+        self.custom_last_html = html_inner
+        self.custom_result_display.setHtml(html_inner)
+        self.custom_send_btn.setEnabled(True)
+        self.custom_send_btn.setText("发送结果到个人日志")
+        
+    def send_custom_log(self):
+        if hasattr(self, 'custom_last_html'):
+            self.log_signal.emit(self.custom_last_html)
+            self.custom_send_btn.setText("已发送")
+            self.custom_send_btn.setEnabled(False)
     
     def closeEvent(self, event):
         self.commit_log()

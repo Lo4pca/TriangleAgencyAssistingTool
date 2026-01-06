@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTextEdit, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QHBoxLayout, QListWidget, QSpinBox, 
     QTabWidget, QFileDialog, QMessageBox, QSplitter,
-    QDialog, QListWidgetItem,QMenu, QInputDialog
+    QDialog, QListWidgetItem,QMenu, QInputDialog, QTextBrowser
 )
 from PySide6.QtGui import QAction
 from PySide6.QtCore import Qt, QFileInfo,QSettings
@@ -24,6 +24,8 @@ from ui.character.tabs.custom_tracks import CustomTracksTab
 from ui.common.styles import GLOBAL_STYLE_SHEET
 
 from ui.tools.weather_tool import WeatherTool
+from ui.tools.dice_tool import DiceTool
+from ui.tools.mission_report import MissionReportDialog
 
 class DragDropEditor(QTextEdit):
     def __init__(self, parent=None):
@@ -126,6 +128,7 @@ class GMMainWindow(QMainWindow):
 
         # key: uid (str) -> value: {"name": str, "sheet": dict, "item": QListWidgetItem}
         self.players_data = {} 
+        self.mission_reports_cache = {}
         self.doc_window_count = 0
 
         self.pf_process = None
@@ -143,6 +146,8 @@ class GMMainWindow(QMainWindow):
         self.server.player_connected.connect(self.on_player_connected)
         self.server.player_disconnected.connect(self.on_player_disconnected)
         self.server.sheet_received.connect(self.update_pl_sheet)
+
+        self.server.mission_report_received.connect(self.on_mission_report_received)
 
     def on_player_connected(self, uid, ip):
         self.log_system(f"新连接: {ip} (ID: {uid})")
@@ -223,6 +228,17 @@ class GMMainWindow(QMainWindow):
         pf_action.setStatusTip("设置服务器启动时自动运行的外部命令")
         pf_action.triggered.connect(self.set_port_forwarding_cmd)
         config_menu.addAction(pf_action)
+
+        tools_menu = menubar.addMenu("工具")
+
+        dice_action = QAction("掷骰工具", self)
+        dice_action.setShortcut("Ctrl+D")
+        dice_action.triggered.connect(self.open_dice_tool)
+        tools_menu.addAction(dice_action)
+
+        weather_action = QAction("松散端与天气", self)
+        weather_action.triggered.connect(self.open_weather_tool)
+        tools_menu.addAction(weather_action)
 
     def _init_ui(self):
         # 1. Main Doc
@@ -309,8 +325,9 @@ class GMMainWindow(QMainWindow):
         chaos_layout.addWidget(self.chaos_spin)
         log_layout.addLayout(chaos_layout)
         
-        self.log_widget = QTextEdit()
-        self.log_widget.setReadOnly(True)
+        self.log_widget = QTextBrowser()
+        self.log_widget.setOpenLinks(False)
+        self.log_widget.anchorClicked.connect(self.on_log_link_clicked)
         log_layout.addWidget(self.log_widget)
         
         self.log_dock.setWidget(log_container)
@@ -517,6 +534,66 @@ class GMMainWindow(QMainWindow):
     
     def broadcast_loose_ends(self, val):
         self.server.send_to_all("loose_ends", val)
+    
+    def open_dice_tool(self):
+        dialog = DiceTool(self.game_name, {}, self)
+        dialog.log_signal.connect(lambda html_content:self.append_log(f"<b>[GM]</b> 进行了掷骰:<br>{html_content}</div>"))
+        dialog.show()
+    
+    def on_mission_report_received(self, uid, data):
+        player_name = self.players_data.get(uid, {}).get("name", "Unknown Agent")
+
+        import time
+        report_id = f"rep_{uid}_{int(time.time())}"
+
+        self.mission_reports_cache[report_id] = {
+            "uid": uid,
+            "name": player_name, 
+            "data": data
+        }
+        
+        self.log_system(f"收到来自 {player_name} 的任务报告")
+
+        status = data.get('status', 'N/A')
+        grade = data.get('final_grade', '未评分')
+        
+        html_link = f"""
+        <div style='background-color: #3d3d3d; border-left: 5px solid #673AB7; padding: 8px; margin: 5px 0; color: #EEE;'>
+            <b>📄 任务报告 ({player_name})</b><br>
+            <span style='font-size:0.9em; color: #AAA;'>状态: {status} | 当前评级: {grade}</span><br>
+            <a href='report:{report_id}' style='color: #81C784; font-weight:bold; text-decoration: none;'>
+               [点击查看详情 & 评分]
+            </a>
+        </div>
+        """
+        self.append_log(html_link)
+    
+    def on_log_link_clicked(self, url):
+        if url.scheme() == "report":
+            report_id = url.path()
+            if report_id in self.mission_reports_cache:
+                info = self.mission_reports_cache[report_id]
+                self.open_mission_report_viewer(report_id, info)
+
+    def open_mission_report_viewer(self, report_id, info):
+        dialog = MissionReportDialog(self, game_name=self.game_name, data=info["data"], is_gm=True)
+        dialog.setWindowTitle(f"任务报告评分 - {info['name']}")
+
+        if dialog.exec() == QDialog.Accepted:
+            updated_data = dialog.collect_data()
+            self.mission_reports_cache[report_id]["data"] = updated_data
+
+            reply = QMessageBox.question(
+                self, "同步", 
+                f"是否将评分后的报告发回给 {info['name']}?", 
+                QMessageBox.Yes | QMessageBox.No
+            )
+            
+            if reply == QMessageBox.Yes:
+                target_uid = info["uid"]
+                self.server.send_to(target_uid, "mission_report", updated_data)
+                new_grade = updated_data.get("final_grade", "无")
+                self.log_system(f"已更新报告并发送给 {info['name']} (评级: {new_grade})")
     
     def closeEvent(self, event):
         self.stop_port_forwarding()

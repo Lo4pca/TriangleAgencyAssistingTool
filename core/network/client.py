@@ -13,6 +13,8 @@ class PLClient(QObject):
     file_received = Signal(str, str)
     loose_ends_updated = Signal(int)
 
+    mission_report_sync = Signal(dict)
+
     def __init__(self):
         super().__init__()
         self.socket = QTcpSocket()
@@ -70,6 +72,8 @@ class PLClient(QObject):
             self.file_received.emit(val.get("name"), val.get("content"))
         elif m_type == MsgType.LOOSE_ENDS:
             self.loose_ends_updated.emit(val)
+        elif m_type == MsgType.MISSION_REPORT:
+            self.mission_report_sync.emit(val)
 
     def send(self, msg_type, data):
         if self.socket.state() == QTcpSocket.ConnectedState:

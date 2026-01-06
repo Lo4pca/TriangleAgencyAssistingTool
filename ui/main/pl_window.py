@@ -16,6 +16,7 @@ from PySide6.QtCore import Qt,QTimer,QUrl,QFileInfo,QFile,QIODevice,QSettings
 
 from ui.character.editor import CharacterEditor
 from ui.tools.dice_tool import DiceTool
+from ui.tools.mission_report import MissionReportDialog
 from core.network.client import PLClient
 
 class PLMainWindow(QMainWindow):
@@ -57,6 +58,7 @@ class PLMainWindow(QMainWindow):
         self.client.log_updated.connect(self.append_log)
         self.client.file_received.connect(self.on_file_received)
         self.client.loose_ends_updated.connect(self.on_loose_ends_sync)
+        self.client.mission_report_sync.connect(self.on_report_sync)
 
         self.client.connected.connect(self.on_connected_success)
         self.client.disconnected.connect(self.on_disconnected)
@@ -190,6 +192,10 @@ class PLMainWindow(QMainWindow):
         dice_action = QAction("掷骰工具", self)
         dice_action.triggered.connect(self.open_dice_tool)
         tools_menu.addAction(dice_action)
+
+        report_action = QAction("填写任务报告", self)
+        report_action.triggered.connect(self.open_mission_report)
+        tools_menu.addAction(report_action)
         
         self.view_menu = menubar.addMenu("视图")
 
@@ -501,6 +507,30 @@ class PLMainWindow(QMainWindow):
         self.conn_status_lbl.setStyleSheet("color: red; font-weight: bold;")
         self.disconnect_btn.setEnabled(False)
         self.append_log("<i>已手动断开连接。</i>")
+    
+    def open_mission_report(self):
+        dialog = MissionReportDialog(self, game_name=self.game_name)
+        dialog.report_submitted.connect(self.send_mission_report)
+        dialog.exec()
+
+    def send_mission_report(self, data):
+        self.client.send("mission_report", data)
+        self.append_log("<b>已发送任务报告</b>")
+    
+    def on_report_sync(self, data):
+        grade = data.get("final_grade", "")
+        status = data.get("status", "Unknown")
+
+        self.append_log(
+            f"<div style='background-color:#222; border:1px solid #4CAF50; padding:5px; margin:5px 0;'>"
+            f"<b>📨 收到 GM 返回的任务报告</b><br>"
+            f"状态: {status} | 最终评级: <span style='color:#FFD700; font-weight:bold;'>{grade}</span><br>"
+            f"</div>"
+        )
+        
+        view_dialog = MissionReportDialog(self, game_name=self.game_name, data=data, is_gm=False)
+        view_dialog.setWindowTitle("任务报告(已评级)")
+        view_dialog.exec()
 
     def load_character(self):
         if not self.char_file.exists():
