@@ -1,13 +1,18 @@
 import random
+import json
+from pathlib import Path
+
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QComboBox, QMessageBox, QFrame,
     QGridLayout, QInputDialog, QWidget, QSpinBox,
-    QTabWidget, QTextEdit
+    QTabWidget, QTextEdit, QListWidget, QListWidgetItem,
+    QLineEdit, QGroupBox, QButtonGroup, QRadioButton,
+    QScrollArea
 )
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QTimer
 
-from models.static_data import QUALITY_ASSURANCES
+from models.static_data import QUALITY_ASSURANCES,HIDDEN_DICE_DB
 
 class DiceButton(QPushButton):
     def __init__(self, index, value=0, is_burned=False, parent=None):
@@ -38,6 +43,315 @@ class DiceButton(QPushButton):
             self.setToolTip("点击消耗QA修改为3")
 
         self.setStyleSheet(f"QPushButton {{ {style} }}")
+
+class HiddenDiceConfigDialog(QDialog):
+    def __init__(self, current_unlocked, current_enabled, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("配置暗骰")
+        self.resize(400, 500)
+        self.unlocked = set(current_unlocked) 
+        self.enabled = set(current_enabled)
+        self.init_ui()
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        input_group = QGroupBox("解锁新暗骰")
+        ig_layout = QHBoxLayout(input_group)
+        self.code_input = QLineEdit()
+        self.code_input.setPlaceholderText("输入受限文档代码...")
+        self.code_input.returnPressed.connect(self.try_unlock)
+
+        self.unlock_btn = QPushButton("解锁")
+        self.unlock_btn.setAutoDefault(False)
+        self.unlock_btn.setDefault(False)
+        self.unlock_btn.clicked.connect(self.try_unlock)
+        
+        ig_layout.addWidget(self.code_input)
+        ig_layout.addWidget(self.unlock_btn)
+        layout.addWidget(input_group)
+
+        layout.addWidget(QLabel("已解锁的暗骰 (右键查看详情):"))
+        self.list_widget = QListWidget()
+        self.list_widget.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.list_widget.customContextMenuRequested.connect(self.show_context_menu)
+        self.refresh_list()
+        layout.addWidget(self.list_widget)
+
+        btn_box = QHBoxLayout()
+        ok_btn = QPushButton("确定")
+        ok_btn.clicked.connect(self.accept)
+        ok_btn.setDefault(True) 
+        
+        cancel_btn = QPushButton("取消")
+        cancel_btn.clicked.connect(self.reject)
+        
+        btn_box.addWidget(ok_btn)
+        btn_box.addWidget(cancel_btn)
+        layout.addLayout(btn_box)
+
+    def try_unlock(self):
+        code = self.code_input.text().strip().upper()
+        if not code: return
+        
+        if code in HIDDEN_DICE_DB:
+            if code not in self.unlocked:
+                self.unlocked.add(code)
+                self.enabled.add(code)
+                self.refresh_list()
+                QMessageBox.information(self, "访问许可", f"暗骰 [{HIDDEN_DICE_DB[code]['name']}] 已解锁")
+                self.code_input.clear()
+            else:
+                QMessageBox.information(self, "提示", "该内容已解锁")
+        else:
+            QMessageBox.warning(self, "拒绝访问", "无效的代码")
+
+    def refresh_list(self):
+        self.list_widget.clear()
+        for code in self.unlocked:
+            data = HIDDEN_DICE_DB[code]
+            item = QListWidgetItem(f"{data['name']}")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Checked if code in self.enabled else Qt.Unchecked)
+            item.setData(Qt.UserRole, code)
+            self.list_widget.addItem(item)
+
+    def show_context_menu(self, pos):
+        item = self.list_widget.itemAt(pos)
+        if item:
+            code = item.data(Qt.UserRole)
+            info = HIDDEN_DICE_DB.get(code)
+            if info:
+                box = QMessageBox(self)
+                box.setWindowTitle(info['name'])
+                box.setText(f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
+                box.setStandardButtons(QMessageBox.Ok)
+                box.open()
+
+    def get_results(self):
+        final_enabled = []
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            code = item.data(Qt.UserRole)
+            if item.checkState() == Qt.Checked:
+                final_enabled.append(code)
+        return list(self.unlocked), final_enabled
+
+class HiddenDiceWindow(QDialog):
+    data_confirmed = Signal(dict)
+    
+    def __init__(self, selected_codes, char_data, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("暗骰结果")
+        self.resize(600, 500)
+
+        self.selected_codes = selected_codes
+        self.char_data = char_data
+        self.dice_states = {} 
+        
+        self._initial_roll()
+        self.init_ui()
+
+    def _initial_roll(self):
+        for code in self.selected_codes:
+            info = HIDDEN_DICE_DB.get(code, {})
+            key = info.get('key', 'unknown')
+            name = info.get('name', '未知暗骰')
+
+            state = {
+                "key": key,
+                "name": name,
+                "res": 0,
+                "can_tricendence": False,
+                "manual_allocation": False,
+                "allocation": 1,
+                "is_fail": False,
+                "mod_history": []
+            }
+
+            if key == "sponsorship":
+                state["res"] = random.randint(1, 8)
+                state["can_tricendence"] = True
+                state["manual_allocation"] = True
+                
+            elif key == "10-sided": 
+                state["res"] = random.randint(1, 10)
+                state["can_tricendence"] = False
+                if state["res"] == 3: state["is_fail"] = True
+
+            elif key == "6-sided": 
+                state["res"] = random.randint(1, 6)
+                state["can_tricendence"] = True
+
+            self.dice_states[code] = state
+
+    def init_ui(self):
+        layout = QVBoxLayout(self)
+
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        container = QWidget()
+        self.list_layout = QVBoxLayout(container)
+        
+        for code, data in self.dice_states.items():
+            self.list_layout.addWidget(self._create_row(code, data))
+            
+        scroll.setWidget(container)
+        layout.addWidget(scroll)
+
+        btn_box = QHBoxLayout()
+        calc_btn = QPushButton("确认并计算结果")
+        calc_btn.setMinimumHeight(40)
+        calc_btn.setStyleSheet("font-weight: bold; font-size: 11pt;")
+        calc_btn.clicked.connect(self.on_confirm_clicked)
+        
+        btn_box.addWidget(calc_btn)
+        layout.addLayout(btn_box)
+
+    def _create_row(self, code, data):
+        group = QGroupBox(data['name'])
+        g_layout = QVBoxLayout(group)
+
+        row_top = QHBoxLayout()
+
+        res_lbl = QLabel(f"结果: <b style='font-size:16pt; color:#1976D2'>{data['res']}</b>")
+        data['widget_res_lbl'] = res_lbl 
+        row_top.addWidget(res_lbl)
+        
+        row_top.addStretch()
+        
+        dice_type = data['key']
+
+        if dice_type == "10-sided":
+            btn_minus = QPushButton("-1")
+            btn_plus = QPushButton("+1")
+            btn_minus.setFixedSize(40, 30)
+            btn_plus.setFixedSize(40, 30)
+            
+            btn_minus.clicked.connect(lambda _, c=code: self.modify_d10(c, -1))
+            btn_plus.clicked.connect(lambda _, c=code: self.modify_d10(c, 1))
+            
+            row_top.addWidget(QLabel("修改(1QA/3处分):"))
+            row_top.addWidget(btn_minus)
+            row_top.addWidget(btn_plus)
+
+        elif dice_type == "6-sided":
+            spin = QSpinBox()
+            spin.setRange(1, 6)
+            spin.setValue(data['res'])
+            btn_set = QPushButton("修改")
+            
+            btn_set.clicked.connect(lambda _, c=code, s=spin: self.modify_d6(c, s.value()))
+            
+            row_top.addWidget(QLabel("指定(1QA/3处分):"))
+            row_top.addWidget(spin)
+            row_top.addWidget(btn_set)
+
+        g_layout.addLayout(row_top)
+
+        row_bot = QHBoxLayout()
+        if data['manual_allocation']:
+            row_bot.addWidget(QLabel("生效方式:"))
+            bg = QButtonGroup(group)
+            r1 = QRadioButton("计入 (+)")
+            r2 = QRadioButton("抵消 (-)")
+            r3 = QRadioButton("忽略 (0)")
+            bg.addButton(r1, 1)
+            bg.addButton(r2, 2)
+            bg.addButton(r3, 3)
+            if data['allocation'] == 1: r1.setChecked(True)
+            elif data['allocation'] == 2: r2.setChecked(True)
+            else: r3.setChecked(True)
+            bg.idClicked.connect(lambda val, c=code: self.update_allocation(c, val))
+            row_bot.addWidget(r1)
+            row_bot.addWidget(r2)
+            row_bot.addWidget(r3)
+        else:
+            info_txt = "投到三的倍数为成功"
+            if data['key'] == '10-sided': info_txt = "投到三为失败"
+            row_bot.addWidget(QLabel(f"<span style='color:gray'>{info_txt}</span>"))
+            
+        row_bot.addStretch()
+        g_layout.addLayout(row_bot)
+        
+        return group
+
+    def try_pay_cost(self):
+        if not self.char_data: 
+            return False
+
+        qa_data = self.char_data.get("quality_assurances", {})
+        current_demerits = self.char_data.get("demerits", 0)
+
+        available_qas = [k for k, v in qa_data.items() if v.get("current", 0) > 0]
+        has_qa = len(available_qas) > 0
+
+        options = []
+        if has_qa:
+            options.append("消耗 1 点 QA")
+        if current_demerits>=3:
+            options.append(f"消耗 3 点处分 (当前: {current_demerits})")
+        
+        item, ok = QInputDialog.getItem(self, "修改暗骰结果", "选择修改方式:", options, 0, False)
+        if not ok:
+            return False
+            
+        if "QA" in item:
+            qa_names = [QUALITY_ASSURANCES[k] for k in available_qas]
+            q_item, q_ok = QInputDialog.getItem(self, "选择 QA", "扣除哪个 QA?", qa_names, 0, False)
+            if q_ok:
+                target_key = next(k for k in available_qas if QUALITY_ASSURANCES[k] == q_item)
+                qa_data[target_key]['current'] -= 1
+                return True
+        else:
+            self.char_data["demerits"] = current_demerits - 3
+            return True
+            
+        return False
+
+    def modify_d10(self, code, delta):
+        data = self.dice_states[code]
+        new_val = data['res'] + delta
+
+        if new_val < 1 or new_val > 10:
+            QMessageBox.warning(self, "无效", "点数超出范围 (1-10)")
+            return
+            
+        if self.try_pay_cost():
+            data['res'] = new_val
+            if data['res'] == 3:
+                data['is_fail'] = True
+            else:
+                data['is_fail'] = False
+                
+            op_str = "+1" if delta > 0 else "-1"
+            data['mod_history'].append(f"十面骰点数{op_str}")
+            self.refresh_ui_value(data)
+
+    def modify_d6(self, code, target_val):
+        data = self.dice_states[code]
+        if target_val == data['res']: return
+
+        if self.try_pay_cost():
+            data['res'] = target_val
+            data['mod_history'].append(f"修改六面骰的点数为{target_val}")
+            self.refresh_ui_value(data)
+
+    def refresh_ui_value(self, data):
+        lbl = data.get('widget_res_lbl')
+        if lbl:
+            lbl.setText(f"结果: <b style='font-size:16pt; color:#4CAF50'>{data['res']}</b> (已修改)")
+
+    def update_allocation(self, code, val):
+        self.dice_states[code]['allocation'] = val
+    
+    def on_confirm_clicked(self):
+        final_data = self.get_final_data()
+        self.data_confirmed.emit(final_data)
+        self.close()
+    
+    def get_final_data(self):
+        return self.dice_states
 
 class QADistributionDialog(QDialog):
     def __init__(self, qa_data, total_points=3, parent=None):
@@ -106,6 +420,28 @@ class DiceTool(QDialog):
     log_signal = Signal(str)
     chaosSignal = Signal(int)
 
+    def get_config_path(self):
+        return Path("data") / "PL" / self.game_name / "hidden_dice.json"
+
+    def load_dice_config(self):
+        path = self.get_config_path()
+        if path.exists():
+            try:
+                with open(path, "r", encoding="utf-8") as f:
+                    return json.load(f)
+            except Exception:
+                return {}
+        return {}
+
+    def save_dice_config(self, config_data):
+        path = self.get_config_path()
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            with open(path, "w", encoding="utf-8") as f:
+                json.dump(config_data, f, ensure_ascii=False, indent=4)
+        except Exception as e:
+            print(f"Error saving config: {e}")
+
     def __init__(self, game_name, character_data, parent=None):
         super().__init__(parent)
         self.game_name = game_name
@@ -113,11 +449,20 @@ class DiceTool(QDialog):
         self.setWindowTitle("掷骰工具")
         self.resize(550, 750)
 
+        self.setWindowFlags(self.windowFlags() | Qt.WindowStaysOnTopHint)
+
         self.current_rolls = [0] * 6
-        self.unused_burnout = 0
         self.is_triscendence = False 
         self.pending_log = False
         self.roll_history = {}
+
+        dice_conf = self.load_dice_config()
+        saved_unlocked = set(dice_conf.get("unlocked", []))
+        saved_enabled = set(dice_conf.get("enabled", []))
+
+        self.unlocked_hidden_codes = list(saved_unlocked)
+        self.enabled_hidden_codes = list(saved_enabled)
+        self.current_hidden_window = None
         
         self.init_ui()
 
@@ -147,21 +492,121 @@ class DiceTool(QDialog):
         layout.setSpacing(15)
         layout.setContentsMargins(10, 10, 10, 10)
 
+        cfg_layout = QHBoxLayout()
+        cfg_layout.addStretch()
+        self.hidden_cfg_btn = QPushButton("配置暗骰")
+        self.hidden_cfg_btn.clicked.connect(self.open_hidden_config)
+        cfg_layout.addWidget(self.hidden_cfg_btn)
+        layout.addLayout(cfg_layout)
+
         self._init_settings(layout)
         self._init_dice(layout)
         self._init_results(layout)
+
+        self.hidden_list_frame = QFrame()
+        self.hidden_list_frame.setVisible(False)
+        hl_layout = QVBoxLayout(self.hidden_list_frame)
+        
+        hl_layout.addWidget(QLabel("<b>特殊暗骰 (勾选以在掷骰时生效):</b>"))
+        
+        self.hidden_list = QListWidget()
+        self.hidden_list.setFixedHeight(100)
+        self.hidden_list.setContextMenuPolicy(Qt.CustomContextMenu)
+        self.hidden_list.customContextMenuRequested.connect(self.show_hidden_context_menu)
+        
+        hl_layout.addWidget(self.hidden_list)
+        layout.addWidget(self.hidden_list_frame)
+        
+        self.refresh_hidden_area()
         
         self.update_burnout_display()
+    
+    def show_hidden_context_menu(self, pos):
+        item = self.hidden_list.itemAt(pos)
+        if not item: return
+        code = item.data(Qt.UserRole)
+        info = HIDDEN_DICE_DB.get(code)
+        if info:
+            box = QMessageBox(self)
+            box.setWindowTitle(info['name'])
+            box.setText(f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
+            box.setStandardButtons(QMessageBox.Ok)
+            box.open()
+
+
+    def open_hidden_config(self):
+        dlg = HiddenDiceConfigDialog(self.unlocked_hidden_codes, self.enabled_hidden_codes, self)
+        if dlg.exec() == QDialog.Accepted:
+            new_unlocked, new_enabled = dlg.get_results()
+            self.unlocked_hidden_codes = new_unlocked
+            self.enabled_hidden_codes = new_enabled
+            config_data = {
+                "unlocked": self.unlocked_hidden_codes,
+                "enabled": self.enabled_hidden_codes
+            }
+            self.save_dice_config(config_data)
+            self.refresh_hidden_area()
+        self.activateWindow()
+    
+    def refresh_hidden_area(self):
+        self.hidden_list.clear()
+        
+        if not self.enabled_hidden_codes:
+            self.hidden_list_frame.setVisible(False)
+            return
+            
+        self.hidden_list_frame.setVisible(True)
+        
+        for code in self.enabled_hidden_codes:
+            if code not in HIDDEN_DICE_DB: continue
+            info = HIDDEN_DICE_DB[code]
+            
+            item = QListWidgetItem(f"🎲 {info['name']}")
+            item.setFlags(item.flags() | Qt.ItemIsUserCheckable)
+            item.setCheckState(Qt.Unchecked)
+            item.setData(Qt.UserRole, code)
+            self.hidden_list.addItem(item)
     
     def _init_results(self, parent_layout):
         self.result_frame = QFrame()
         self.result_frame.setStyleSheet("border: 1px solid #CCCCCC; border-radius: 8px; background-color: #FAFAFA;")
         self.result_frame.setVisible(False) 
         vbox = QVBoxLayout(self.result_frame)
+
+        self.mode_switcher_frame = QFrame()
+        self.mode_switcher_frame.setVisible(False)
+        ms_layout = QHBoxLayout(self.mode_switcher_frame)
+        ms_layout.setContentsMargins(0, 0, 0, 5)
+        
+        ms_layout.addWidget(QLabel("十面骰使用场景:", styleSheet="font-weight:bold; color:#006064;"))
+        self.mode_group = QButtonGroup(self)
+        self.rb_addon = QRadioButton("其他")
+        self.rb_override = QRadioButton("异常能力")
+        self.rb_addon.setStyleSheet("""
+            QRadioButton {
+                color: black;
+            }
+        """)
+        self.rb_override.setStyleSheet("""
+            QRadioButton {
+                color: black;
+            }
+        """)
+        self.rb_override.setChecked(True)
+        
+        self.mode_group.addButton(self.rb_override, 1)
+        self.mode_group.addButton(self.rb_addon, 2)
+
+        self.mode_group.idClicked.connect(self.refresh_display_from_cache)
+        
+        ms_layout.addWidget(self.rb_addon)
+        ms_layout.addWidget(self.rb_override)
+        ms_layout.addStretch()
+        
+        vbox.addWidget(self.mode_switcher_frame)
         
         self.status_label = QLabel()
         self.status_label.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.status_label.setStyleSheet("font-size: 18pt; font-weight: bold;") 
         vbox.addWidget(self.status_label)
         
         self.chaos_label = QLabel()
@@ -191,6 +636,7 @@ class DiceTool(QDialog):
             btn.clicked.connect(lambda _, c=code: self.apply_triscendence(c))
             tri_layout.addWidget(btn)
         
+        self.triscendence_widget.setVisible(False)
         vbox.addWidget(self.triscendence_widget)
         
         parent_layout.addWidget(self.result_frame)
@@ -208,7 +654,7 @@ class DiceTool(QDialog):
             self.dice_buttons.append(btn)
         parent_layout.addWidget(dice_frame)
 
-        self.roll_btn = QPushButton("掷 骰 (6d4)")
+        self.roll_btn = QPushButton("掷 骰")
         self.roll_btn.setMinimumHeight(50)
         self.roll_btn.setStyleSheet("""
             QPushButton {
@@ -267,77 +713,211 @@ class DiceTool(QDialog):
         extra = 1 if val <= 0 else 0
         self.burnout_label.setText(f"下次掷骰时的燃尽: {base + extra} {'(缺少素质【'+QUALITY_ASSURANCES[key]+'】)' if extra else ''}")
 
-    def refresh_ui_dice(self, burned_indices):
+    def refresh_ui_dice(self, burned_indices, enabled=True):
         for i, btn in enumerate(self.dice_buttons):
             val = self.current_rolls[i]
             is_burned = i in burned_indices
             btn.update_state(val, is_burned)
+            btn.setEnabled(enabled)
+            if not enabled:
+                btn.setStyleSheet("background-color: #EEE; color: #AAA; border: 1px dashed #CCC;")
 
     def roll_dice(self):
-        self.commit_log() # 如果有未提交的先提交
+        self.commit_log()
         
+        self.current_rolls = [random.randint(1, 4) for _ in range(6)]
         key, val = self.get_current_qa()
         base_burn = self.data.get("additional_burnout", 0)
         has_qa = val > 0
         total_burn = base_burn + (1 if not has_qa else 0)
-
-        self.current_rolls = [random.randint(1, 4) for _ in range(6)]
-        
-        threes_indices = [i for i, x in enumerate(self.current_rolls) if x == 3]
-        total_threes = len(threes_indices)
-        self.is_triscendence = (total_threes == 3)
-
-        burned_indices = set()
-        if not self.is_triscendence:
-            num_to_burn = min(total_threes, total_burn)
-            for i in range(num_to_burn):
-                burned_indices.add(threes_indices[i])
-        self.unused_burnout=total_burn-len(burned_indices)
         
         self.roll_history = {
             "qa_name": QUALITY_ASSURANCES.get(key, "未知"),
             "base_burnout": base_burn,
             "missing_qa": not has_qa,
             "total_burnout": total_burn,
-            "burned_indices": list(burned_indices),
+            "burned_indices": [],
             "modifications": [],
             "triscendence_choice": None,
             "chaos_growth": 0
         }
         self.pending_log = True
 
-        self.refresh_ui_dice(burned_indices)
+        selected_codes = []
+        for i in range(self.hidden_list.count()):
+            item = self.hidden_list.item(i)
+            if item.checkState() == Qt.Checked:
+                selected_codes.append(item.data(Qt.UserRole))
+        
+        if selected_codes:
+            if self.current_hidden_window:
+                self.current_hidden_window.close()
+
+            self.current_hidden_window = HiddenDiceWindow(selected_codes, self.data, self)
+            self.current_hidden_window.data_confirmed.connect(self.finalize_with_hidden_dice)
+            self.current_hidden_window.show()
+            
         self.calculate_result()
+        self.result_frame.setVisible(True)
+    
+    def finalize_with_hidden_dice(self, hidden_data):
+        self.roll_history["hidden_dice"] = hidden_data
+        self.refresh_qa_combo()
+        self.dataChanged.emit()
+        self.calculate_result()
+        self.current_hidden_window = None
 
     def calculate_result(self):
-        burned_set = set(self.roll_history["burned_indices"])
-        effective_threes = 0
-        for i, val in enumerate(self.current_rolls):
-            if val == 3 and i not in burned_set:
-                effective_threes += 1
+        h = self.roll_history
+        hidden_data = h.get("hidden_dice", {})
 
-        is_success = effective_threes > 0
+        has_n1 = any(d['key'] == '10-sided' for d in hidden_data.values())
+        
+        self.scenario_addon = self._calculate_logic(override_6d4=False)
+        self.scenario_override = self._calculate_logic(override_6d4=True) if has_n1 else None
 
-        if self.is_triscendence:
-            chaos_growth = 0
-            status_text = f"成功 ({effective_threes}) - 三重升华!"
+        if has_n1:
+            self.mode_switcher_frame.setVisible(True)
+            if not self.mode_group.checkedButton():
+                self.rb_override.setChecked(True)
+        else:
+            self.mode_switcher_frame.setVisible(False)
+            self.rb_addon.setChecked(True)
+
+        self.refresh_display_from_cache()
+
+    def refresh_display_from_cache(self, _=None):
+        is_override_mode = self.rb_override.isChecked() and self.scenario_override is not None
+        
+        result = self.scenario_override if is_override_mode else self.scenario_addon
+
+        self.roll_history.update(result)
+        self.roll_history['is_override_mode'] = is_override_mode
+
+        ui_burned = [] if is_override_mode else result['burned_indices']
+        self.refresh_ui_dice(ui_burned, enabled=not is_override_mode)
+
+        self.is_triscendence = result['is_triscendence']
+        
+        final_chaos = result['chaos_growth']
+        total_successes = result['final_successes']
+        is_fail = result['is_fail']
+        
+        status_text = ""
+        status_style = ""
+        
+        if is_fail:
+            status_text = "十面骰失败"
+            status_style = "color: red; font-weight:900;"
+        elif self.is_triscendence:
+            final_chaos = 0
+            status_text = f"成功 ({total_successes}) - 三重升华!"
             status_style = "color: #E6B422;"
-        elif is_success:
-            chaos_growth = 0 if effective_threes==3 else (6 - effective_threes) + self.unused_burnout
-            status_text = f"成功 ({effective_threes})"
+        elif total_successes > 0:
+            status_text = f"成功 ({total_successes})"
             status_style = "color: #4CAF50;"
         else:
-            chaos_growth = 6 + self.unused_burnout
             status_text = "失败"
             status_style = "color: #C41E3A;"
-        
-        self.result_frame.setVisible(True)
+            
         self.status_label.setText(status_text)
         self.status_label.setStyleSheet(f"font-size: 18pt; font-weight: bold; {status_style}")
-        self.chaos_label.setText(f"混沌增长: {chaos_growth}")
+        self.chaos_label.setText(f"混沌增长: {final_chaos}")
         self.triscendence_widget.setVisible(self.is_triscendence)
+
+    def _calculate_logic(self, override_6d4):
+        h = self.roll_history
+        hidden_data = h.get("hidden_dice", {})
+
+        burn_pool = h['total_burnout']
+        burned_indices_6d4 = []
         
-        self.roll_history["chaos_growth"] = chaos_growth
+        base_successes = 0
+        base_chaos = 0
+
+        n1_data = None
+        for _, d in hidden_data.items():
+            if d['key'] == '10-sided': n1_data = d
+        is_fail_flag = n1_data.get('is_fail') if n1_data else False
+
+        if not override_6d4:
+            for i, val in enumerate(self.current_rolls):
+                if val == 3:
+                    if burn_pool > 0:
+                        burn_pool -= 1
+                        burned_indices_6d4.append(i)
+                    else:
+                        base_successes += 1
+            if base_successes == 3: base_chaos = 0
+            else: base_chaos = 6 - base_successes
+        else:
+            res = n1_data['res']
+            if is_fail_flag:
+                base_successes = 0
+            else:
+                base_successes = res
+            cnt=min(base_successes,burn_pool)
+            base_successes-=cnt
+            burn_pool-=cnt
+            base_chaos = res+cnt
+
+        hidden_success_contrib = 0
+        hidden_chaos_contrib = 0
+        hidden_tri_helpers = 0
+
+        for code, d in hidden_data.items():
+            key = d['key']
+            res = d['res']
+            alloc = d['allocation']
+
+            if override_6d4 and key == '10-sided': continue
+
+            local_success = 0
+            local_chaos = 0
+            
+            if key == "sponsorship":
+                if res % 3 == 0: local_success = res // 3
+            elif key == "6-sided":
+                if res % 3 == 0: local_success = res // 3
+                else: local_chaos += 1
+            elif key == "10-sided":
+                if d.get('is_fail'): 
+                    local_success = 0
+                else:
+                    local_success = res
+                local_chaos += res
+            
+            hidden_chaos_contrib += local_chaos
+            if local_success!=0 and burn_pool>0:
+                cnt=min(local_success,burn_pool)
+                local_success-=cnt
+                burn_pool-=cnt
+                hidden_chaos_contrib+=cnt
+
+            if alloc == 1: # Add
+                hidden_success_contrib += local_success
+                if d.get('can_tricendence'): hidden_tri_helpers += local_success
+            elif alloc == 2: # Sub
+                hidden_success_contrib -= local_success
+                if d.get('can_tricendence'): hidden_tri_helpers -= local_success
+
+        total_successes = base_successes + hidden_success_contrib
+        total_successes = max(0, total_successes)
+
+        base_chaos +=  burn_pool
+        
+        final_chaos = base_chaos + hidden_chaos_contrib
+        is_triscendence = not n1_data and ((base_successes + hidden_tri_helpers) == 3)
+        if is_triscendence: final_chaos = 0
+
+        return {
+            "final_successes": total_successes,
+            "chaos_growth": final_chaos,
+            "is_fail": is_fail_flag,
+            "burned_indices": burned_indices_6d4,
+            "unused_burnout_val": burn_pool,
+            "is_triscendence": is_triscendence
+        }
 
     def on_die_clicked(self, index):
         if not self.data:
@@ -407,29 +987,79 @@ class DiceTool(QDialog):
     def build_html_report(self):
         h = self.roll_history
         if not h: return ""
+        hidden_data = h.get("hidden_dice", {})
 
-        html = f"<h3>掷骰 (6d4) - {h['qa_name']}</h3>"
-
-        html += f"<div style='color:#666; font-size:9pt'>燃尽: {h['total_burnout']} (额外燃尽{h['base_burnout']}点 + 缺少QA{1 if h['missing_qa'] else 0}点)</div>"
-
-        dice_html = ""
-        burned_set = set(h['burned_indices'])
+        burned_indices = set(h.get('burned_indices', []))
+        is_override = h.get('is_override_mode', False)
         
-        for i, val in enumerate(self.current_rolls):
-            style = "font-weight:bold;"
-            if i in burned_set:
-                style += "text-decoration:line-through; color:#C41E3A;"
-            elif val == 3:
-                style += "color:#4CAF50;"
+        html = f"<h3>掷骰结果 - {h['qa_name']}</h3>"
+
+        if is_override:
+            html += "<div style='font-weight:bold; margin-bottom:5px;'>[使用异常能力]</div>"
+        html += f"<div style='color:#666; font-size:9pt'>燃尽: {h['total_burnout']}<br>额外燃尽{h['base_burnout']}点 + 缺少QA{1 if h['missing_qa'] else 0}点<br>直接转化为混沌的燃尽数量: {h.get('unused_burnout_val', 0)}</div>"
+        if is_override:
+            html += """
+            <div style='padding: 8px; border: 1px dashed #0097A7; margin-bottom: 10px; color: #777;'>
+                <span style='text-decoration:line-through'>已忽略 6d4 掷骰结果</span>
+            </div>
+            """
+        else:
+            dice_html = ""
             
-            dice_html += f"<span style='{style}'>{val}</span> "
-        html += f"<div style='font-size:14pt; margin:5px 0'>[{dice_html}]</div>"
+            for i, val in enumerate(self.current_rolls):
+                style = "font-weight:bold;"
+                if i in burned_indices:
+                    style += "text-decoration:line-through; color:#C41E3A;"
+                elif val == 3:
+                    style += "color:#4CAF50;"
+                
+                dice_html += f"<span style='{style}'>{val}</span> "
+            html += f"<div style='font-size:14pt; margin:5px 0'>[{dice_html}]</div>"
+
+        html += f"<div style='margin-bottom:5px;'>最终结果: <b>{h.get('final_successes', 0)}</b> 个成功</div>"
 
         if h['modifications']:
             html += "<ul>" + "".join([f"<li>{m}</li>" for m in h['modifications']]) + "</ul>"
 
-        if h['triscendence_choice']:
+        if h.get('triscendence_choice'):
             html += f"<div style='color:#E6B422; font-weight:bold'>✨ 三重升华: {h['triscendence_choice']}</div>"
+
+        if hidden_data:
+            html += "<div style='font-weight: bold; margin-bottom: 4px;'>暗骰详情:</div>"
+            html += "<ul style='margin: 0; padding-left: 20px;'>"
+
+            for code, d in hidden_data.items():
+                name = d['name']
+                res = d['res']
+                key = d['key']
+
+                li_style = ""
+                name_addon = ""
+
+                if is_override and key == '10-sided':
+                    li_style = "font-weight:bold;"
+                    name_addon = " (覆盖6d4)"
+                
+                res_str = str(res)
+                note = ""
+
+                history_html = ""
+                if d.get('mod_history'):
+                    note += f" <span style='color:orange; font-size:0.9em'>(已修改)</span>"
+                    history_items = "".join([f"<li style='color:#666; font-size:0.9em;'>{record}</li>" for record in d['mod_history']])
+                    history_html = f"<ul style='margin-top:2px; margin-bottom:5px; padding-left:15px;'>{history_items}</ul>"
+                
+                alloc = d.get('allocation', 1)
+                if alloc == 2: note += " <span style='color:red'>[抵消]</span>"
+                elif alloc == 3: note += " <span style='color:gray'>[忽略]</span>"
+
+                html += f"<li style='{li_style}'>{name}: {res_str}{name_addon}{note}{history_html}</li>"
+            html += "</ul>"
+
+            if h.get('is_fail'):
+                html += "<div style='color:red; font-weight:bold; margin-top:4px;'>十面骰失败</div>"
+                 
+            html += "</div>"
 
         html += f"<hr><div>混沌增长: <b>{h['chaos_growth']}</b></div>"
         return html
