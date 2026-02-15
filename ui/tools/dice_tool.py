@@ -10,9 +10,11 @@ from PySide6.QtWidgets import (
     QLineEdit, QGroupBox, QButtonGroup, QRadioButton,
     QScrollArea
 )
-from PySide6.QtCore import Qt, Signal, QTimer
+from PySide6.QtCore import Qt, Signal
 
 from models.static_data import QUALITY_ASSURANCES,HIDDEN_DICE_DB
+
+
 
 class DiceButton(QPushButton):
     def __init__(self, index, value=0, is_burned=False, parent=None):
