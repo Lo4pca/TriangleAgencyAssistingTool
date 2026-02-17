@@ -1,6 +1,6 @@
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QSizePolicy, QFrame
+    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import Qt
 from models.static_data import (
