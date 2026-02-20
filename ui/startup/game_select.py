@@ -1,26 +1,30 @@
 import shutil
 from pathlib import Path
+from typing import Optional
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QListWidget, QPushButton, 
-    QHBoxLayout, QInputDialog, QMessageBox, QLabel
+    QHBoxLayout, QInputDialog, QMessageBox, QLabel, QWidget
 )
+from PySide6.QtCore import Qt
 
 class GameSelectDialog(QDialog):
-    def __init__(self, role, parent=None):
+    """游戏选择与管理弹窗"""
+    
+    def __init__(self, role: str, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.role = role
-        self.selected_game = None
+        self.selected_game: Optional[str] = None
         self.GAMES_DIR = Path("data") / self.role
         
         self.setWindowTitle(f"选择游戏 ({self.role})")
         self.resize(450, 350)
+        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self._init_ui()
         self.refresh_list()
 
-    def _init_ui(self):
+    def _init_ui(self) -> None:
         layout = QVBoxLayout(self)
-        
         layout.addWidget(QLabel(f"当前身份: {self.role}"))
         
         self.game_list = QListWidget()
@@ -53,16 +57,15 @@ class GameSelectDialog(QDialog):
         self.btn_switch.clicked.connect(self.reject)
         layout.addWidget(self.btn_switch)
 
-    def refresh_list(self):
+    def refresh_list(self) -> None:
         self.game_list.clear()
-        if not self.GAMES_DIR.exists():
-            self.GAMES_DIR.mkdir(parents=True, exist_ok=True)
-        if self.GAMES_DIR.exists():
-            for item in self.GAMES_DIR.iterdir():
-                if item.is_dir():
-                    self.game_list.addItem(item.name)
+        self.GAMES_DIR.mkdir(parents=True, exist_ok=True)
+        
+        for item in self.GAMES_DIR.iterdir():
+            if item.is_dir():
+                self.game_list.addItem(item.name)
 
-    def create_game(self):
+    def create_game(self) -> None:
         name, ok = QInputDialog.getText(self, "新建游戏", "请输入游戏名称:")
         if ok and name:
             safe_name = "".join([c for c in name if c.isalnum() or c in (' ', '_', '-')]).strip()
@@ -77,7 +80,7 @@ class GameSelectDialog(QDialog):
                 path.mkdir(parents=True)
                 self.refresh_list()
 
-    def delete_game(self):
+    def delete_game(self) -> None:
         item = self.game_list.currentItem()
         if not item: return
         
@@ -96,7 +99,7 @@ class GameSelectDialog(QDialog):
             except Exception as e:
                 QMessageBox.critical(self, "删除失败", str(e))
 
-    def on_confirm(self):
+    def on_confirm(self) -> None:
         item = self.game_list.currentItem()
         if item:
             self.selected_game = item.text()
