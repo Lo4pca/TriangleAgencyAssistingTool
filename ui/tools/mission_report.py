@@ -53,8 +53,6 @@ class MissionReportDialog(QDialog):
 
     def __init__(self, parent: Optional[QWidget] = None, game_name: str = "default", data: Optional[Dict[str, Any]] = None, is_gm: bool = False):
         super().__init__(parent)
-
-        self.setAttribute(Qt.WA_DeleteOnClose)
         
         self.resize(900, 850)
         self.is_gm = is_gm

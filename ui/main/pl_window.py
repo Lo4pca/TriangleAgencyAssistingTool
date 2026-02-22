@@ -20,7 +20,7 @@ from ui.character.editor import CharacterEditor
 from ui.tools.dice_tool import DiceTool
 from ui.tools.mission_report import MissionReportDialog
 from core.network.client import PLClient
-from core.network.protocol import MsgType # [新增] 引入强类型枚举
+from core.network.protocol import MsgType
 
 
 class PLMainWindow(QMainWindow):
@@ -225,7 +225,7 @@ class PLMainWindow(QMainWindow):
         chaos_lbl.setStyleSheet("color: #FF5555; font-weight: bold;")
         self.chaos_spin = QSpinBox()
         self.chaos_spin.setRange(0, 999)
-        self.chaos_spin.setStyleSheet("color: white; background: transparent; border: none; font-weight: bold; font-size: 11pt;")
+        self.chaos_spin.setStyleSheet("color: #FF5555; background: transparent; border: none; font-weight: bold; font-size: 11pt;")
         self.chaos_spin.setButtonSymbols(QSpinBox.ButtonSymbols.NoButtons)
         self.chaos_spin.setFixedWidth(40)
         self.chaos_spin.setAlignment(Qt.AlignmentFlag.AlignCenter)

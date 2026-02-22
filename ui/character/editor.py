@@ -53,7 +53,6 @@ class CharacterEditor(QDialog):
 
     def __init__(self, game_name: str, parent: QWidget = None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_DeleteOnClose)
         
         self.game_name = game_name
         self.setWindowTitle(f"为 {game_name} 创建角色卡")

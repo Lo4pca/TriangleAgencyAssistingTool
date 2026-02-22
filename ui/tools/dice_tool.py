@@ -22,7 +22,7 @@ from models.static_data import QUALITY_ASSURANCES, HIDDEN_DICE_DB
 class DiceEngine:
     
     @staticmethod
-    def evaluate_scenario(rolls: List[int], burn_pool: int, hidden_data: Dict[str, Any], override_6d4: bool) -> Dict[str, Any]:
+    def evaluate_scenario(rolls: List[int], burn_pool: int, hidden_data: Dict[str, Any], override_6d4: bool, has_modifications: bool = False) -> Dict[str, Any]:
         """
         计算单次判定的核心逻辑（成功数、混沌、燃尽、是否升华）
         """
@@ -100,9 +100,9 @@ class DiceEngine:
         base_chaos += burn_pool
         final_chaos = base_chaos + hidden_chaos_contrib
         
-        # 三重升华判定
-        is_triscendence = not n1_data and ((base_successes + hidden_tri_helpers) == 3)
-        if is_triscendence: 
+        # 三重升华判定：必须是第一次自然计算（未经过任何人为修改）
+        is_triscendence = not n1_data and not has_modifications and ((base_successes + hidden_tri_helpers) == 3)
+        if is_triscendence:
             final_chaos = 0
 
         return {
@@ -212,7 +212,6 @@ class DiceButton(QPushButton):
 class HiddenDiceConfigDialog(QDialog):
     def __init__(self, current_unlocked: List[str], current_enabled: List[str], parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_DeleteOnClose)
         self.setWindowTitle("配置暗骰")
         self.resize(400, 500)
         self.unlocked = set(current_unlocked) 
@@ -287,6 +286,7 @@ class HiddenDiceConfigDialog(QDialog):
             info = HIDDEN_DICE_DB.get(code)
             if info:
                 box = QMessageBox(self)
+                box.setAttribute(Qt.WA_DeleteOnClose)
                 box.setWindowTitle(info['name'])
                 box.setText(f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
                 box.setStandardButtons(QMessageBox.Ok)
@@ -478,7 +478,6 @@ class HiddenDiceWindow(QDialog):
 class QADistributionDialog(QDialog):
     def __init__(self, qa_data: Dict[str, Any], total_points: int = 3, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.setAttribute(Qt.WA_DeleteOnClose)
         self.qa_data = qa_data
         self.total_points = total_points
         self.spinboxes = {}
@@ -642,6 +641,7 @@ class DiceTool(QDialog):
         info = HIDDEN_DICE_DB.get(code)
         if info:
             box = QMessageBox(self)
+            box.setAttribute(Qt.WA_DeleteOnClose)
             box.setWindowTitle(info['name'])
             box.setText(f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
             box.setStandardButtons(QMessageBox.Ok)
@@ -851,10 +851,11 @@ class DiceTool(QDialog):
         h = self.roll_history
         hidden_data = h.get("hidden_dice", {})
         has_n1 = any(d['key'] == '10-sided' for d in hidden_data.values())
+        has_mods = len(h.get("modifications", [])) > 0 or any(len(d.get("mod_history", [])) > 0 for d in hidden_data.values())
         
         # 依赖 DiceEngine 核心计算
-        self.scenario_addon = DiceEngine.evaluate_scenario(self.current_rolls, h['total_burnout'], hidden_data, False)
-        self.scenario_override = DiceEngine.evaluate_scenario(self.current_rolls, h['total_burnout'], hidden_data, True) if has_n1 else None
+        self.scenario_addon = DiceEngine.evaluate_scenario(self.current_rolls, h['total_burnout'], hidden_data, False, has_mods)
+        self.scenario_override = DiceEngine.evaluate_scenario(self.current_rolls, h['total_burnout'], hidden_data, True, has_mods) if has_n1 else None
 
         if has_n1:
             self.mode_switcher_frame.setVisible(True)
@@ -927,6 +928,7 @@ class DiceTool(QDialog):
             QMessageBox.information(self, "叙事", "此为叙事效果")
         elif effect_type == "restore_qa":
             qa_data = self.data.get("quality_assurances", {})
+            #Qt.WA_DeleteOnClose不应该用在需要后续获取资源的dialog上。python GC会自行处理
             dlg = QADistributionDialog(qa_data, total_points=3, parent=self)
             if dlg.exec():
                 distribution = dlg.get_distribution()

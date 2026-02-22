@@ -96,9 +96,6 @@ class WeatherTool(QDialog):
         super().__init__(parent)
         self.game_name = game_name
         
-        # 确保关闭窗口时释放内存，避免内存泄漏
-        self.setAttribute(Qt.WA_DeleteOnClose)
-        
         self.setWindowTitle("松散端与天气")
         self.resize(550, 750)
 
@@ -312,7 +309,6 @@ class WeatherTool(QDialog):
     def show_full_list(self) -> None:
         """展示完整的天气列表对话框"""
         dialog = QDialog(self)
-        dialog.setAttribute(Qt.WA_DeleteOnClose) # 修复可能的内存泄漏
         dialog.setWindowTitle("完整天气列表 (1-20)")
         dialog.resize(600, 800)
         

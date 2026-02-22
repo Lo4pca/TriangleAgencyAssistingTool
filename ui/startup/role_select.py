@@ -11,7 +11,6 @@ class RoleSelectDialog(QDialog):
         self.selected_role: Optional[str] = None
         
         self.setFixedSize(300, 200)
-        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self._init_ui()
 

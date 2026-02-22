@@ -18,7 +18,6 @@ class GameSelectDialog(QDialog):
         
         self.setWindowTitle(f"选择游戏 ({self.role})")
         self.resize(450, 350)
-        self.setAttribute(Qt.WA_DeleteOnClose)
 
         self._init_ui()
         self.refresh_list()
