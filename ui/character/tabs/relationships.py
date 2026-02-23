@@ -1,3 +1,4 @@
+from typing import Dict, Any, List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QLabel, 
     QPushButton, QScrollArea, QFrame, QGridLayout
@@ -7,13 +8,15 @@ from PySide6.QtCore import Qt
 from ui.common.widgets import RelationshipCard
 
 class RelationshipsTab(QWidget):
-    def __init__(self, character_data, parent=None):
+    """人际关系管理标签页"""
+
+    def __init__(self, character_data: Dict[str, Any], parent: QWidget = None):
         super().__init__(parent)
         self.data = character_data
-        self.cards = []
+        self.cards: List[RelationshipCard] = []
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         
@@ -26,37 +29,29 @@ class RelationshipsTab(QWidget):
         self.content_layout.setSpacing(20)
         self.content_layout.setContentsMargins(20, 20, 20, 20)
         
-        # --- 标题区 ---
         self.content_layout.addLayout(self._create_header())
         
-        # 黄色分割线
         sep = QFrame()
         sep.setFrameShape(QFrame.HLine)
         sep.setStyleSheet("background-color: #E6B422; min-height: 2px;")
         self.content_layout.addWidget(sep)
         
-        # --- 卡片区域 ---
         self.cards_grid = QGridLayout()
         self.cards_grid.setSpacing(15)
         self.content_layout.addLayout(self.cards_grid)
         
-        # 加载数据
+        # 数据加载初始化
         saved_rels = self.data.get("relationships", [])
-        if saved_rels:
-            for rel_data in saved_rels:
-                self.add_card(rel_data, refresh=False)
-        else:
-            for _ in range(4):
-                self.add_card({}, refresh=False)
-        self.refresh_grid()
+        initial_data = saved_rels if saved_rels else [{} for _ in range(4)]
+        
+        for rel_data in initial_data:
+            self.add_card(rel_data, refresh=False)
+        self.refresh_grid_layout()
             
         self.add_btn = QPushButton("+ 添加关系")
         self.add_btn.setFixedHeight(40)
         self.add_btn.setStyleSheet("""
-            QPushButton {
-                border: 2px dashed #E6B422; color: #E6B422; 
-                font-weight: bold; border-radius: 10px; font-size: 11pt;
-            }
+            QPushButton { border: 2px dashed #E6B422; color: #E6B422; font-weight: bold; border-radius: 10px; font-size: 11pt; }
             QPushButton:hover { background-color: #F0EFF5; }
         """)
         self.add_btn.clicked.connect(lambda: self.add_card({}))
@@ -68,32 +63,27 @@ class RelationshipsTab(QWidget):
         
         self.update_network_count()
 
-    def _create_header(self):
+    def _create_header(self) -> QHBoxLayout:
         layout = QHBoxLayout()
-        
-        # 左侧标题块
         title_box = QVBoxLayout()
         title_lbl = QLabel("人际关系")
         title_lbl.setStyleSheet("font-size: 24pt; font-weight: bold; color: #E6B422;")
         title_box.addWidget(title_lbl)
         
-        # 计数器
         count_frame = QFrame()
-        count_frame.setStyleSheet("QFrame { border: 2px solid #000044; border-radius: 5px; background: white; }QLabel { border: none; }")
+        count_frame.setStyleSheet("QFrame { border: 2px solid #000044; border-radius: 5px; background: white; } QLabel { border: none; }")
         c_layout = QHBoxLayout(count_frame)
         c_layout.setContentsMargins(10, 5, 10, 5)
-        
         c_layout.addWidget(QLabel("🌐", styleSheet="font-size:14pt; color:#E6B422;"))
         c_layout.addWidget(QLabel("网络化的人际关系", styleSheet="color:#E6B422; font-weight:bold; font-size:12pt;"))
         c_layout.addStretch()
+        
         self.count_label = QLabel("0", styleSheet="color:#333; font-weight:bold; font-size:14pt;")
         c_layout.addWidget(self.count_label)
-        
         title_box.addWidget(count_frame)
         layout.addLayout(title_box)
         layout.addStretch()
         
-        # 右侧 R 标志
         r_box = QVBoxLayout()
         r_header = QHBoxLayout()
         r_icon = QLabel("R")
@@ -101,7 +91,6 @@ class RelationshipsTab(QWidget):
         
         self.reality_name_label = QLabel(self.data.get("reality", "未选择"))
         self.reality_name_label.setStyleSheet("color:#E6B422; font-weight:bold; font-size: 14pt; margin-left: 10px;")
-        
         r_header.addWidget(r_icon)
         r_header.addWidget(self.reality_name_label)
         
@@ -111,36 +100,35 @@ class RelationshipsTab(QWidget):
         
         return layout
 
-    def add_card(self, data, refresh=True):
+    def add_card(self, data: Dict[str, Any], refresh: bool = True) -> None:
         card = RelationshipCard(data)
         card.deleteRequested.connect(self.remove_card)
         card.stateChanged.connect(self.update_network_count)
         self.cards.append(card)
         if refresh:
-            self.refresh_grid()
+            self.refresh_grid_layout()
             self.update_network_count()
         
-    def remove_card(self, card_widget):
+    def remove_card(self, card_widget: QWidget) -> None:
         if card_widget in self.cards:
             self.cards.remove(card_widget)
+            self.cards_grid.removeWidget(card_widget)
             card_widget.deleteLater()
-            self.refresh_grid()
+            self.refresh_grid_layout()
             self.update_network_count()
 
-    def refresh_grid(self):
-        while self.cards_grid.count():
-            self.cards_grid.takeAt(0)
-
+    def refresh_grid_layout(self) -> None:
+        """重新排列网格中的卡片，避免销毁再重建"""
         for i, card in enumerate(self.cards):
-            self.cards_grid.addWidget(card, i // 2, i % 2)
+            self.cards_grid.addWidget(card, i // 2, i % 2) #再次添加同一个widget时，addWidget只是移动位置，不会创建新对象
 
-    def update_reality_name(self, name):
+    def update_reality_name(self, name: str) -> None:
         if hasattr(self, 'reality_name_label'):
             self.reality_name_label.setText(name)
 
-    def update_network_count(self):
+    def update_network_count(self) -> None:
         count = sum(1 for card in self.cards if card.is_networked())
         self.count_label.setText(str(count))
 
-    def get_data(self):
+    def get_data(self) -> Dict[str, List[Dict[str, Any]]]:
         return {"relationships": [card.get_data() for card in self.cards]}

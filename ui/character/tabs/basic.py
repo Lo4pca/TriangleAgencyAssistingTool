@@ -1,105 +1,102 @@
+from typing import Dict, Any, Tuple, Optional, List, Callable
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QGridLayout, 
-    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QSizePolicy, QFrame
+    QLabel, QLineEdit, QComboBox, QSpinBox, QCheckBox, QSizePolicy
 )
 from PySide6.QtCore import Qt
+
 from models.static_data import (
     REALITY_DATA, COMPETENCY_DATA, ANOMALY_NAMES, QUALITY_ASSURANCES
 )
 from ui.common.widgets import create_label, HLine
 
 class BasicInfoTab(QWidget):
-    def __init__(self, character_data, parent=None):
+    """基本信息与状态管理标签页"""
+
+    def __init__(self, character_data: Dict[str, Any], parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.data = character_data
 
-        self.dynamic_labels = {} 
-        self.sanctioned_behavior_labels = []
+        # 缓存动态标签组件引用，便于后续更新数据
+        self.dynamic_labels: Dict[str, QLabel] = {}
+        self.sanctioned_behavior_labels: List[QLabel] = []
+        self.quality_assurances: Dict[str, Tuple[QSpinBox, QSpinBox]] = {}
+        self.track_boxes: List[QCheckBox] = []
         
         self.init_ui()
 
-    def init_ui(self):
+    def init_ui(self) -> None:
         main_layout = QVBoxLayout(self)
         main_layout.setSpacing(15)
         main_layout.setContentsMargins(20, 20, 20, 20)
         
-        # --- 区域 1: 头部信息 ---
+        # 1. 头部信息
         header_layout = QHBoxLayout()
-        
-        # 左侧输入框
-        left_box = self._init_header_left()
-        header_layout.addLayout(left_box, 5)
-
-        # 右侧下拉框 (A/R/C)
-        right_box = self._init_header_right()
-        header_layout.addLayout(right_box, 3)
-        
+        header_layout.addLayout(self._init_header_left(), 5)
+        header_layout.addLayout(self._init_header_right(), 3)
         main_layout.addLayout(header_layout)
         main_layout.addWidget(HLine())
 
-        # --- 区域 2: 中间内容区 ---
+        # 2. 中间内容区
         content_layout = QHBoxLayout()
         content_layout.setSpacing(30)
-
-        # 左栏：轨道、状态、动态信息块
-        left_column = self._init_content_left()
-        content_layout.addLayout(left_column, 4)
-
-        # 右栏：素质保障
-        right_column = self._init_content_right()
-        content_layout.addLayout(right_column, 3)
-
+        content_layout.addLayout(self._init_content_left(), 4)
+        content_layout.addLayout(self._init_content_right(), 3)
         main_layout.addLayout(content_layout)
 
+        # 强制触发一次同步
         self._update_identity_fields()
         self._update_behavior_fields()
 
-    def _init_header_left(self):
+    def _init_header_left(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setSpacing(10)
 
         row1 = QHBoxLayout()
         row1.addWidget(QLabel("角色名"), 0, Qt.AlignmentFlag.AlignBottom)
-        self.name_input = QLineEdit(self.data.get("name",""))
+        self.name_input = QLineEdit(self.data.get("name", ""))
         self.name_input.setProperty("class", "UnderlineInput")
         row1.addWidget(self.name_input, 1)
+        
         row1.addSpacing(20)
+        
         row1.addWidget(QLabel("代号"), 0, Qt.AlignmentFlag.AlignBottom)
-        self.pronouns_input = QLineEdit(self.data.get("pronouns",""))
+        self.pronouns_input = QLineEdit(self.data.get("pronouns", ""))
         self.pronouns_input.setProperty("class", "UnderlineInput")
         row1.addWidget(self.pronouns_input, 1)
         layout.addLayout(row1)
 
-        def add_row(label, key):
+        def add_row(label: str, key: str) -> QLineEdit:
             r = QHBoxLayout()
             r.addWidget(QLabel(label), 0, Qt.AlignmentFlag.AlignBottom)
             inp = QLineEdit(self.data.get(key, ""))
             inp.setProperty("class", "UnderlineInput")
             r.addWidget(inp, 1)
-            return r, inp
+            layout.addLayout(r)
+            return inp
 
-        r2, self.title_input = add_row("特工职称", "title")
-        layout.addLayout(r2)
-        r3, self.standing_input = add_row("特工信誉", "standing")
-        layout.addLayout(r3)
+        self.title_input = add_row("特工职称", "title")
+        self.standing_input = add_row("特工信誉", "standing")
         return layout
 
-    def _init_header_right(self):
+    def _init_header_right(self) -> QGridLayout:
         grid = QGridLayout()
         grid.setVerticalSpacing(5)
         grid.setHorizontalSpacing(10)
 
-        def add_arc_row(row_idx, label_char, label_text, data_key, source_list, signal=None):
+        def add_arc_row(row_idx: int, label_char: str, label_text: str, data_key: str, source_list: List[str], signal: Optional[Callable] = None) -> QComboBox:
             lbl_char = create_label(label_char, class_name=f"Label{label_char}")
             grid.addWidget(lbl_char, row_idx, 0, Qt.AlignmentFlag.AlignRight)
             grid.addWidget(create_label(label_text, class_name=f"Label{label_char}"), row_idx, 1)
             
             combo = QComboBox()
             combo.addItems(source_list)
-            combo.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Fixed)
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
+            
             current_val = self.data.get(data_key)
             if current_val in source_list:
                 combo.setCurrentText(current_val)
+                
             if signal:
                 combo.currentIndexChanged.connect(signal)
             grid.addWidget(combo, row_idx, 2)
@@ -111,20 +108,19 @@ class BasicInfoTab(QWidget):
         
         return grid
 
-    def _init_content_left(self):
+    def _init_content_left(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.setSpacing(15)
 
-        # 1. 顶部统计 (轨道 + 嘉奖/处分)
+        # 1. 顶部统计
         top_stats = QHBoxLayout()
         
-        # --- 轨道 ---
+        # 轨道复选框
         track_layout = QVBoxLayout()
         track_layout.setSpacing(5)
         self.dynamic_labels["track_desc"] = QLabel()
         self.dynamic_labels["track_desc"].setWordWrap(True)
         self.dynamic_labels["track_desc"].setProperty("class", "TrackDesc")
-        
         self.dynamic_labels["track_name"] = QLabel()
         self.dynamic_labels["track_name"].setProperty("class", "TrackName")
         
@@ -133,8 +129,7 @@ class BasicInfoTab(QWidget):
         
         track_boxes_layout = QHBoxLayout()
         track_boxes_layout.setAlignment(Qt.AlignmentFlag.AlignLeft)
-        self.track_boxes = []
-        saved_tracks = self.data.get("track_states", [False]*4)
+        saved_tracks = self.data.get("track_states", [False] * 4)
         for i in range(4):
             box = QCheckBox()
             box.setProperty("class", "TrackBox")
@@ -142,12 +137,13 @@ class BasicInfoTab(QWidget):
             if i < len(saved_tracks): box.setChecked(saved_tracks[i])
             self.track_boxes.append(box)
             track_boxes_layout.addWidget(box)
+            
         track_layout.addLayout(track_boxes_layout)
         track_layout.addStretch()
 
-        # --- 统计数值 ---
+        # 数值统计框
         stats_layout = QVBoxLayout()
-        def add_stat(icon, title, val):
+        def add_stat(icon: str, title: str, val: int) -> QSpinBox:
             r = QHBoxLayout()
             r.addWidget(create_label(icon, style="color:#C41E3A; font-size:14pt;"))
             r.addWidget(create_label(title, class_name="StatLabelRed"))
@@ -159,9 +155,9 @@ class BasicInfoTab(QWidget):
             stats_layout.addLayout(r)
             return s
 
-        self.commendations_input = add_stat("★", "嘉奖", self.data.get("commendations",0))
-        self.demerits_input = add_stat("🔨", "处分", self.data.get("demerits",0))
-        self.additional_burnout_input = add_stat("🔥", "额外力竭", self.data.get("additional_burnout",0))
+        self.commendations_input = add_stat("★", "嘉奖", self.data.get("commendations", 0))
+        self.demerits_input = add_stat("🔨", "处分", self.data.get("demerits", 0))
+        self.additional_burnout_input = add_stat("🔥", "额外力竭", self.data.get("additional_burnout", 0))
 
         top_stats.addLayout(stats_layout, 2)
         top_stats.addLayout(track_layout, 3)
@@ -173,7 +169,7 @@ class BasicInfoTab(QWidget):
         layout.addLayout(self._create_info_block("力竭释放", "HeaderYellow", "burnout_release", "检查此处来看你是否能取消力竭"))
         layout.addLayout(self._create_info_block("最高原则", "HeaderRed", "prime_directive", "执行以下行为将获得1次处分"))
 
-        # 3. 授权行为 (特殊结构)
+        # 3. 授权行为区
         actions_block = QVBoxLayout()
         actions_block.setSpacing(2)
         h_row = QHBoxLayout()
@@ -184,7 +180,6 @@ class BasicInfoTab(QWidget):
         
         actions_block.addWidget(create_label("执行以下行为将获得1次嘉奖", class_name="BlockDesc"))
         
-        self.sanctioned_behavior_labels = []
         for _ in range(3):
             row = QHBoxLayout()
             row.setContentsMargins(15, 0, 0, 0)
@@ -202,31 +197,27 @@ class BasicInfoTab(QWidget):
         
         return layout
 
-    def _create_info_block(self, title, style_class, key_prefix, static_desc):
+    def _create_info_block(self, title: str, style_class: str, key_prefix: str, static_desc: str) -> QVBoxLayout:
         block = QVBoxLayout()
         block.setSpacing(2)
         
-        # 标题行
         h_row = QHBoxLayout()
         h_row.addWidget(create_label("▶", class_name=style_class))
         h_row.addWidget(create_label(title, class_name=f"BlockHeader {style_class}"))
         h_row.addStretch()
         block.addLayout(h_row)
         
-        # 静态描述
         lbl_static = QLabel(static_desc)
         lbl_static.setWordWrap(True)
         lbl_static.setProperty("class", "BlockDesc")
         block.addWidget(lbl_static)
         
-        # 动态标题
         lbl_title = QLabel()
         lbl_title.setWordWrap(True)
         lbl_title.setProperty("class", "BlockValueTitle")
         self.dynamic_labels[f"{key_prefix}_title"] = lbl_title
         block.addWidget(lbl_title)
         
-        # 动态描述
         lbl_desc = QLabel()
         lbl_desc.setWordWrap(True)
         lbl_desc.setProperty("class", "BlockValueDesc")
@@ -235,14 +226,13 @@ class BasicInfoTab(QWidget):
         
         return block
 
-    def _init_content_right(self):
+    def _init_content_right(self) -> QVBoxLayout:
         layout = QVBoxLayout()
         layout.addWidget(create_label("素质保障(当前/最大)", class_name="QualityMainHeader"), 0, Qt.AlignmentFlag.AlignCenter)
         layout.addSpacing(20)
 
         grid = QGridLayout()
         grid.setVerticalSpacing(15)
-        self.quality_assurances = {}
         self.qa_values = self.data.get("quality_assurances", {})
 
         for i, (key, cn) in enumerate(QUALITY_ASSURANCES.items()):
@@ -274,20 +264,20 @@ class BasicInfoTab(QWidget):
         layout.addStretch()
         return layout
 
-    def _update_identity_fields(self):
+    def _update_identity_fields(self) -> None:
+        """更新受现实身份(Reality)影响的动态文本"""
         identity = self.reality_combo.currentText()
         data = REALITY_DATA.get(identity, {})
 
         self.dynamic_labels["reality_trigger_title"].setText(data.get("trigger", ""))
         self.dynamic_labels["reality_trigger_desc"].setText(data.get("trigger_desc", ""))
-        
         self.dynamic_labels["burnout_release_title"].setText(data.get("burnout", ""))
         self.dynamic_labels["burnout_release_desc"].setText(data.get("burnout_desc", ""))
-        
         self.dynamic_labels["track_name"].setText(data.get("track_name", "轨道名称"))
         self.dynamic_labels["track_desc"].setText(data.get("track_desc", "轨道描述文本..."))
 
-    def _update_behavior_fields(self):
+    def _update_behavior_fields(self) -> None:
+        """更新受公司职能(Competency)影响的动态文本"""
         func = self.competency_combo.currentText()
         data = COMPETENCY_DATA.get(func, {})
         
@@ -298,7 +288,8 @@ class BasicInfoTab(QWidget):
         for i, label in enumerate(self.sanctioned_behavior_labels):
             label.setText(behaviors[i] if i < len(behaviors) else "")
 
-    def get_data(self):
+    def get_data(self) -> Dict[str, Any]:
+        """序列化收集当前表单数据"""
         qa_data = {k: {"current": c.value(), "max": m.value()} for k, (c, m) in self.quality_assurances.items()}
         return {
             "name": self.name_input.text(),

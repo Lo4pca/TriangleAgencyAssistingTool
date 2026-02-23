@@ -1,6 +1,7 @@
 from pathlib import Path
 import json
 import datetime
+from typing import Dict, Any, List, Optional
 
 from PySide6.QtWidgets import (
     QDialog, QVBoxLayout, QHBoxLayout, QLabel, QLineEdit, QTextEdit, 
@@ -10,16 +11,65 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
+# ==========================================
+# 数据与业务逻辑层
+# ==========================================
+class MissionReportManager:
+    """任务报告数据管理器，负责处理文件 I/O 和数据序列化"""
+
+    STATUS_MAP: Dict[int, str] = {
+        1: "Neutralized", 
+        2: "Captured", 
+        3: "Escaped", 
+        4: "Other"
+    }
+
+    @staticmethod
+    def save_report_to_file(data: Dict[str, Any], file_path: Path) -> None:
+        """将报告数据保存为本地 JSON 文件"""
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        with open(file_path, "w", encoding="utf-8") as f:
+            json.dump(data, f, ensure_ascii=False, indent=4)
+
+    @staticmethod
+    def load_report_from_file(file_path: Path) -> Dict[str, Any]:
+        """从本地 JSON 文件加载报告数据"""
+        with open(file_path, "r", encoding="utf-8") as f:
+            return json.load(f)
+
+    @classmethod
+    def get_status_str(cls, status_id: int) -> str:
+        """根据 ID 获取状态字符串"""
+        return cls.STATUS_MAP.get(status_id, "Unknown")
+
+
+# ==========================================
+# UI 视图与控制层
+# ==========================================
 class MissionReportDialog(QDialog):
+    """任务报告编辑器对话框"""
+    
     report_submitted = Signal(dict)
 
-    def __init__(self, parent=None, game_name="default", data=None, is_gm=False):
+    def __init__(self, parent: Optional[QWidget] = None, game_name: str = "default", data: Optional[Dict[str, Any]] = None, is_gm: bool = False):
         super().__init__(parent)
+        
         self.resize(900, 850)
         self.is_gm = is_gm
         self.game_name = game_name
         self.data = data or {}
 
+        # 字典用于保存 UI 组件的引用，方便取值与赋值
+        self.analysis_fields: Dict[str, QWidget] = {}
+        self.sup_fields: Dict[str, QLineEdit] = {}
+
+        self.init_ui()
+
+        if self.data:
+            self.load_data(self.data)
+
+    def init_ui(self) -> None:
+        """初始化整体 UI 布局"""
         main_layout = QVBoxLayout(self)
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
@@ -36,16 +86,13 @@ class MissionReportDialog(QDialog):
         scroll.setWidget(container)
         main_layout.addWidget(scroll)
 
-        if self.data:
-            self.load_data(self.data)
-
-    def _init_header(self):
+    def _init_header(self) -> None:
         title = QLabel("任务报告")
         title.setStyleSheet("font-size: 24px; font-weight: bold; margin-bottom: 10px;")
-        title.setAlignment(Qt.AlignCenter)
+        title.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.layout.addWidget(title)
 
-    def _init_status_section(self):
+    def _init_status_section(self) -> None:
         group = QGroupBox("异常状态")
         layout = QHBoxLayout(group)
         
@@ -72,12 +119,11 @@ class MissionReportDialog(QDialog):
         
         self.layout.addWidget(group)
 
-    def _init_analysis_section(self):
+    def _init_analysis_section(self) -> None:
         group = QGroupBox("异常分析")
         layout = QVBoxLayout(group)
         
-        self.analysis_fields = {}
-
+        # 代号单行输入
         h_layout_alias = QHBoxLayout()
         lbl_alias = QLabel("代号:")
         lbl_alias.setFixedWidth(80)
@@ -87,14 +133,14 @@ class MissionReportDialog(QDialog):
         layout.addLayout(h_layout_alias)
         self.analysis_fields["alias"] = inp_alias
 
+        # 多行文本域
         multi_line_fields = ["行为", "焦点", "领域"]
-
         for label in multi_line_fields:
             h_layout = QHBoxLayout()
             
             lbl = QLabel(f"{label}:")
             lbl.setFixedWidth(80)
-            lbl.setAlignment(Qt.AlignTop) 
+            lbl.setAlignment(Qt.AlignmentFlag.AlignTop) 
             
             inp = QTextEdit()
             inp.setMinimumHeight(70) 
@@ -108,14 +154,15 @@ class MissionReportDialog(QDialog):
             
         self.layout.addWidget(group)
 
-    def _init_middle_section(self):
+    def _init_middle_section(self) -> None:
         h_layout = QHBoxLayout()
 
+        # 左侧：松散端表格
         le_group = QGroupBox("松散端")
         le_layout = QVBoxLayout(le_group)
         self.le_table = QTableWidget(5, 3)
         self.le_table.setHorizontalHeaderLabels(["名字", "数量", "备注"])
-        self.le_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.Stretch)
+        self.le_table.horizontalHeader().setSectionResizeMode(2, QHeaderView.ResizeMode.Stretch)
         self.le_table.verticalHeader().setVisible(False)
         self.le_table.setAlternatingRowColors(True)
         le_layout.addWidget(self.le_table)
@@ -126,13 +173,13 @@ class MissionReportDialog(QDialog):
 
         h_layout.addWidget(le_group, stretch=2)
         
+        # 右侧：表现评估与GM评分
         right_layout = QVBoxLayout()
 
         sup_group = QGroupBox("表现评估")
         sup_layout = QVBoxLayout(sup_group)
         
-        self.sup_fields = {}
-        for item in ["MVP","观察期"]:
+        for item in ["MVP", "观察期"]:
             l_layout = QHBoxLayout()
             l_layout.addWidget(QLabel(f"{item}:"))
             inp = QLineEdit()
@@ -160,13 +207,13 @@ class MissionReportDialog(QDialog):
         h_layout.addLayout(right_layout, stretch=1)
         self.layout.addLayout(h_layout)
 
-    def _init_objectives_section(self):
+    def _init_objectives_section(self) -> None:
         group = QGroupBox("可选目标")
         layout = QVBoxLayout(group)
         
         self.obj_table = QTableWidget(3, 3)
         self.obj_table.setHorizontalHeaderLabels(["名称", "奖励", "特工"])
-        self.obj_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.obj_table.horizontalHeader().setSectionResizeMode(0, QHeaderView.ResizeMode.Stretch)
         self.obj_table.verticalHeader().setVisible(False)
         self.obj_table.setAlternatingRowColors(True)
         layout.addWidget(self.obj_table)
@@ -177,7 +224,7 @@ class MissionReportDialog(QDialog):
         
         self.layout.addWidget(group)
 
-    def _init_footer_section(self):
+    def _init_footer_section(self) -> None:
         btn_layout = QHBoxLayout()
 
         import_btn = QPushButton("导入")
@@ -203,11 +250,44 @@ class MissionReportDialog(QDialog):
             
         self.layout.addLayout(btn_layout)
     
-    def on_save_clicked(self):
+    # --- 表格辅助方法 ---
+
+    def get_table_data(self, table: QTableWidget) -> List[List[str]]:
+        """从表格控件提取非空行的数据集"""
+        rows = []
+        for r in range(table.rowCount()):
+            row_data = []
+            is_empty = True
+            for c in range(table.columnCount()):
+                item = table.item(r, c)
+                text = item.text() if item else ""
+                row_data.append(text)
+                if text.strip(): 
+                    is_empty = False
+            if not is_empty:
+                rows.append(row_data)
+        return rows
+
+    def set_table_data(self, table: QTableWidget, data: List[List[str]]) -> None:
+        """将二维数据集填充到表格控件"""
+        table.setRowCount(max(len(data), 5))
+        for r, row_data in enumerate(data):
+            for c, text in enumerate(row_data):
+                table.setItem(r, c, QTableWidgetItem(str(text)))
+
+    def add_table_row(self, table: QTableWidget) -> None:
+        """在表格末尾追加一行"""
+        row_count = table.rowCount()
+        table.insertRow(row_count)
+
+    # --- 数据序列化与交互行为 ---
+
+    def on_save_clicked(self) -> None:
+        """保存任务报告至本地磁盘"""
         data = self.collect_data()
 
-        save_dir = Path("data") / ("GM" if self.is_gm else "PL") / self.game_name / "mission_reports"
-        save_dir.mkdir(parents=True, exist_ok=True)
+        role_dir = "GM" if self.is_gm else "PL"
+        save_dir = Path("data") / role_dir / self.game_name / "mission_reports"
         
         timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         default_name = f"mission_report_{timestamp}.json"
@@ -218,14 +298,16 @@ class MissionReportDialog(QDialog):
         
         if file_path:
             try:
-                with open(file_path, "w", encoding="utf-8") as f:
-                    json.dump(data, f, ensure_ascii=False, indent=4)
+                MissionReportManager.save_report_to_file(data, Path(file_path))
                 QMessageBox.information(self, "成功", f"报告已保存至:\n{file_path}")
             except Exception as e:
                 QMessageBox.critical(self, "错误", f"保存失败: {e}")
     
-    def on_import_clicked(self):
-        target_dir = Path("data") / ("GM" if self.is_gm else "PL") / self.game_name / "mission_reports"
+    def on_import_clicked(self) -> None:
+        """从本地磁盘导入任务报告数据"""
+        role_dir = "GM" if self.is_gm else "PL"
+        target_dir = Path("data") / role_dir / self.game_name / "mission_reports"
+        
         if not target_dir.exists():
             target_dir = Path("data")
         
@@ -235,59 +317,34 @@ class MissionReportDialog(QDialog):
         
         if file_path:
             try:
-                with open(file_path, "r", encoding="utf-8") as f:
-                    data = json.load(f)
-
+                data = MissionReportManager.load_report_from_file(Path(file_path))
                 self.load_data(data)
                 QMessageBox.information(self, "导入成功", f"已加载文件:\n{Path(file_path).name}")
-                
             except Exception as e:
                 QMessageBox.critical(self, "导入失败", f"无法读取或解析文件:\n{e}")
 
-    def get_table_data(self, table):
-        rows = []
-        for r in range(table.rowCount()):
-            row_data = []
-            is_empty = True
-            for c in range(table.columnCount()):
-                item = table.item(r, c)
-                text = item.text() if item else ""
-                row_data.append(text)
-                if text.strip(): is_empty = False
-            if not is_empty:
-                rows.append(row_data)
-        return rows
-
-    def set_table_data(self, table, data):
-        table.setRowCount(max(len(data), 5))
-        for r, row_data in enumerate(data):
-            for c, text in enumerate(row_data):
-                table.setItem(r, c, QTableWidgetItem(str(text)))
-
-    def add_table_row(self, table):
-        row_count = table.rowCount()
-        table.insertRow(row_count)
-
-    def on_send_clicked(self):
+    def on_send_clicked(self) -> None:
+        """提交当前任务报告并通过信号广播（限 PL 模式）"""
         reply = QMessageBox.question(self, "确认", "确定要提交此任务报告吗？", QMessageBox.Yes | QMessageBox.No)
         if reply == QMessageBox.Yes:
             data = self.collect_data()
             self.report_submitted.emit(data)
             self.accept()
 
-    def collect_data(self):
+    def collect_data(self) -> Dict[str, Any]:
+        """将 UI 控件的数据打包为标准字典字典格式"""
         status_id = self.status_group.checkedId()
-        status_map = {1: "Neutralized", 2: "Captured", 3: "Escaped", 4: "Other"}
+        status_str = MissionReportManager.get_status_str(status_id)
 
         analysis_data = {}
         for k, widget in self.analysis_fields.items():
             if isinstance(widget, QLineEdit):
                 analysis_data[k] = widget.text()
-            else:
+            elif isinstance(widget, QTextEdit):
                 analysis_data[k] = widget.toPlainText()
 
         return {
-            "status": status_map.get(status_id, "Unknown"),
+            "status": status_str,
             "status_other": self.other_input.text(),
             "analysis": analysis_data,
             "loose_ends": self.get_table_data(self.le_table),
@@ -300,7 +357,8 @@ class MissionReportDialog(QDialog):
             "final_grade": self.grade_input.text()
         }
 
-    def load_data(self, d):
+    def load_data(self, d: Dict[str, Any]) -> None:
+        """读取数据字典并还原到对应 UI 控件"""
         status = d.get("status", "")
         if status == "Neutralized": self.cb_neutralized.setChecked(True)
         elif status == "Captured": self.cb_captured.setChecked(True)
@@ -310,8 +368,9 @@ class MissionReportDialog(QDialog):
             self.other_input.setText(d.get("status_other", ""))
 
         ana = d.get("analysis", {})
-        for k, v in self.analysis_fields.items():
-            v.setText(ana.get(k, ""))
+        for k, widget in self.analysis_fields.items():
+            if isinstance(widget, QLineEdit) or isinstance(widget, QTextEdit):
+                widget.setText(ana.get(k, ""))
 
         self.set_table_data(self.le_table, d.get("loose_ends", []))
         self.set_table_data(self.obj_table, d.get("objectives", []))

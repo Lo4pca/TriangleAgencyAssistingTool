@@ -1,15 +1,21 @@
 import json
 import sys
 from pathlib import Path
+from typing import Any, Dict, Optional
 
 class ConfigManager:
-    _instance = None
+    """全局配置管理器 (单例模式)"""
+    
+    _instance: Optional['ConfigManager'] = None
+    _initialized: bool = False
+    
+    # 兼容 PyInstaller 打包后的路径
     if getattr(sys, 'frozen', False):
         BASE_DIR = Path(sys.executable).parent
     else:
         BASE_DIR = Path(__file__).parent.parent
     
-    CONFIG_PATH = BASE_DIR / "data" / "global_config.json"
+    CONFIG_PATH: Path = BASE_DIR / "data" / "global_config.json"
 
     def __new__(cls, *args, **kwargs):
         if cls._instance is None:
@@ -17,13 +23,14 @@ class ConfigManager:
             cls._instance._initialized = False
         return cls._instance
 
-    def __init__(self):
+    def __init__(self) -> None:
         if self._initialized:
             return
-        self.config = self._load_config()
+        self.config: Dict[str, Any] = self._load_config()
         self._initialized = True
 
-    def _load_config(self):
+    def _load_config(self) -> Dict[str, Any]:
+        """从本地加载配置文件"""
         if not self.CONFIG_PATH.exists():
             return {"user_role": None}
         try:
@@ -33,7 +40,8 @@ class ConfigManager:
             print(f"Error loading config: {e}")
             return {"user_role": None}
 
-    def save_config(self):
+    def save_config(self) -> None:
+        """保存配置到本地文件"""
         try:
             self.CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
             with open(self.CONFIG_PATH, "w", encoding="utf-8") as f:
@@ -41,15 +49,15 @@ class ConfigManager:
         except Exception as e:
             print(f"Error saving config: {e}")
 
-    def get(self, key, default=None):
+    def get(self, key: str, default: Any = None) -> Any:
         return self.config.get(key, default)
 
-    def set(self, key, value):
+    def set(self, key: str, value: Any) -> None:
         self.config[key] = value
         self.save_config()
 
-    def get_role(self):
+    def get_role(self) -> Optional[str]:
         return self.get("user_role")
 
-    def set_role(self, role):
+    def set_role(self, role: Optional[str]) -> None:
         self.set("user_role", role)
