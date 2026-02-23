@@ -12,7 +12,8 @@ class MsgType(str, Enum):
     LOOSE_ENDS = "loose_ends"       # 松散端数值同步
     MISSION_REPORT = "mission_report" # 任务报告同步
 
-HEADER_SIZE = 4 
+MAGIC=b"TAMG"
+HEADER_SIZE = len(MAGIC)+4
 HEADER_FORMAT = '!I'
 
 def pack_msg(msg_type: MsgType, data: Any) -> bytes:
@@ -24,7 +25,7 @@ def pack_msg(msg_type: MsgType, data: Any) -> bytes:
     msg_dict = {"type": msg_type.value if isinstance(msg_type, MsgType) else msg_type, "data": data}
     json_bytes = json.dumps(msg_dict, ensure_ascii=False).encode('utf-8')
     header = struct.pack(HEADER_FORMAT, len(json_bytes))
-    return header + json_bytes
+    return MAGIC + header + json_bytes
 
 def unpack_msg(body_bytes: bytes) -> Optional[Dict[str, Any]]:
     """
