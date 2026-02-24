@@ -29,15 +29,9 @@
 
 如果有python和pyside6库的话直接运行`app.py`即可
 
-releases文件夹下有macOS（m1）和windows 10下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行（不知道怎么发大文件release只能用`git lfs`的废物）
+[releases](https://github.com/Lo4pca/TriangleAgencyAssistingTool/releases)下有macOS（m1）和windows 10(amd64)下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行
 
 软件会在安装目录下创建一个`data`文件夹，用于存储角色卡等数据
-
-由于`git lfs`追踪文件耗时较长，我不会每次修改代码时都打包一份软件。目前releases下的软件版本停留在`v0.0.1`,相比于直接运行`app.py`（`v0.0.3`）缺少了如下内容：
-- 松散端管理与天气事件（d20掷骰）
-- 对“多人联机时混沌值统计出错”的修复
-- 自定义掷骰
-- 任务报告的填写和接收功能
 
 ## 更改日志
 
@@ -51,6 +45,12 @@ releases文件夹下有macOS（m1）和windows 10下使用[pyinstaller](https://
 
 - 增加自定义掷骰
 - 增加任务报告的填写和接收功能
+
+### v0.0.4
+
+- 为掷骰工具添加了规则书中的暗骰逻辑
+- 重构代码并添加了type hints
+- 修复pl_window.py中因变量名错误（proxy_process应为pf_process）导致gsocket进程无法正常关闭的bug
 
 ## 后记
 

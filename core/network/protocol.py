@@ -13,7 +13,8 @@ class MsgType(str, Enum):
     MISSION_REPORT = "mission_report" # 任务报告同步
 
 MAGIC=b"TAMG"
-HEADER_SIZE = len(MAGIC)+4
+MAGIC_LENGTH=len(MAGIC)
+HEADER_SIZE = MAGIC_LENGTH+4
 HEADER_FORMAT = '!I'
 
 def pack_msg(msg_type: MsgType, data: Any) -> bytes:

@@ -3,7 +3,7 @@ from typing import Any, Optional
 from PySide6.QtNetwork import QTcpSocket, QAbstractSocket
 from PySide6.QtCore import QObject, Signal
 
-from .protocol import unpack_msg, pack_msg, HEADER_SIZE, MsgType, HEADER_FORMAT, MAGIC
+from .protocol import unpack_msg, pack_msg, HEADER_SIZE, MsgType, HEADER_FORMAT, MAGIC, MAGIC_LENGTH
 
 class PLClient(QObject):
     """处理PL的 TCP 网络通信逻辑"""
@@ -59,7 +59,7 @@ class PLClient(QObject):
                 self._buffer = self._buffer[magic_pos:]
             if len(self._buffer) < HEADER_SIZE:
                 return
-            body_length = struct.unpack(HEADER_FORMAT, self._buffer[len(MAGIC):HEADER_SIZE])[0]
+            body_length = struct.unpack(HEADER_FORMAT, self._buffer[MAGIC_LENGTH:HEADER_SIZE])[0]
 
             # 检查缓冲区是否已包含完整的 Body
             if len(self._buffer) < HEADER_SIZE + body_length:

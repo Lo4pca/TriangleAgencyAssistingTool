@@ -3,7 +3,7 @@ from typing import Dict, Any, Optional, Tuple
 from PySide6.QtNetwork import QTcpServer, QHostAddress, QTcpSocket, QAbstractSocket
 from PySide6.QtCore import QObject, Signal
 
-from .protocol import unpack_msg, pack_msg, HEADER_SIZE, MsgType, HEADER_FORMAT, MAGIC
+from .protocol import unpack_msg, pack_msg, HEADER_SIZE, MsgType, HEADER_FORMAT, MAGIC, MAGIC_LENGTH
 
 class GMServer(QObject):
     """处理GM的 TCP 服务端逻辑"""
@@ -91,7 +91,7 @@ class GMServer(QObject):
                 ctx["buffer"] = ctx["buffer"][magic_pos:]
             if len(ctx["buffer"]) < HEADER_SIZE:
                 return
-            body_length = struct.unpack(HEADER_FORMAT, ctx["buffer"][len(MAGIC):HEADER_SIZE])[0]
+            body_length = struct.unpack(HEADER_FORMAT, ctx["buffer"][MAGIC_LENGTH:HEADER_SIZE])[0]
             
             if len(ctx["buffer"]) < HEADER_SIZE + body_length:
                 break 
