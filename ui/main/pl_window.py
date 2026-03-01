@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTextBrowser, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QHBoxLayout, QSpinBox, QTabWidget,
     QMessageBox, QFileDialog, QTextEdit, QDialog, QFormLayout, 
-    QLineEdit, QDialogButtonBox, QGroupBox, QApplication
+    QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox
 )
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import Qt, QTimer, QUrl, QFileInfo, QFile, QIODevice, QSettings
@@ -62,6 +62,7 @@ class PLMainWindow(QMainWindow):
         self.client.file_received.connect(self.on_file_received)
         self.client.loose_ends_updated.connect(self.on_loose_ends_sync)
         self.client.mission_report_sync.connect(self.on_report_sync)
+        self.client.chat_received.connect(lambda data: self.append_chat_message(data["sender"], data["text"]))
 
         self.client.connected.connect(self.on_connected_success)
         self.client.disconnected.connect(self.on_disconnected)
@@ -153,6 +154,69 @@ class PLMainWindow(QMainWindow):
     def send_mission_report(self, data: Dict[str, Any]) -> None:
         self.client.send(MsgType.MISSION_REPORT, data)
         self.append_log("<b>已发送任务报告</b>")
+    
+    # ==========================================
+    # 聊天系统 UI 与逻辑
+    # ==========================================
+    def _init_chat_dock(self):
+        self.chat_dock = QDockWidget("文字聊天", self)
+        self.chat_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(5, 5, 5, 5)
+        
+        self.chat_history = QTextBrowser()
+        layout.addWidget(self.chat_history)
+        
+        input_layout = QHBoxLayout()
+        self.chat_target_combo = QComboBox()
+        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
+        input_layout.addWidget(self.chat_target_combo)
+        
+        self.chat_input = QLineEdit()
+        self.chat_input.setPlaceholderText("输入聊天内容...")
+        self.chat_input.returnPressed.connect(self.send_chat_message)
+        input_layout.addWidget(self.chat_input)
+        
+        self.send_chat_btn = QPushButton("发送")
+        self.send_chat_btn.clicked.connect(self.send_chat_message)
+        input_layout.addWidget(self.send_chat_btn)
+        
+        layout.addLayout(input_layout)
+        self.chat_dock.setWidget(container)
+        self.splitDockWidget(self.log_dock, self.chat_dock, Qt.Horizontal)
+
+    def send_chat_message(self):
+        text = self.chat_input.text().strip()
+        if not text: return
+        
+        target = self.chat_target_combo.currentData()
+        sender_name = self.character_data.get("name", "Player")
+        
+        msg_data = {
+            "sender": sender_name,
+            "target": target,
+            "text": text
+        }
+        
+        self.client.send(MsgType.CHAT, msg_data)
+        self.append_chat_message(sender_name,text)
+        self.chat_input.clear()
+
+    def append_chat_message(self, sender: str, text: str):
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+
+        my_name = self.character_data.get("name", "")
+        if sender == "GM":
+            color = "#C41E3A"
+        elif sender == my_name:
+            color = "#E9E1E1"
+        else:
+            color = "#006064"
+            
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
+        self.chat_history.append(html)
 
     # ==========================
     # UI 初始化
@@ -187,7 +251,7 @@ class PLMainWindow(QMainWindow):
         net_menu.addAction(conn_action)
         
     def _init_docks(self) -> None:
-        # --- 1. Log Dock ---
+        # --- 1. Log Dock and Chat Dock ---
         self.log_dock = QDockWidget("游戏日志 & 控制台", self)
         self.log_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
@@ -247,6 +311,8 @@ class PLMainWindow(QMainWindow):
         self.log_dock.setWidget(log_container)
         self.addDockWidget(Qt.DockWidgetArea.BottomDockWidgetArea, self.log_dock)
         self.view_menu.addAction(self.log_dock.toggleViewAction())
+
+        self._init_chat_dock()
 
         # --- 2. Notes Dock ---
         self.notes_dock = QDockWidget("额外笔记", self)
@@ -465,8 +531,7 @@ class PLMainWindow(QMainWindow):
                 QMessageBox.critical(self, "错误", str(e))
 
     def append_log(self, html_content: str) -> None:
-        if hasattr(self, 'log_widget'):
-            self.log_widget.append(html_content)
+        self.log_widget.append(html_content)
 
     def do_mission_prep(self) -> None:
         reply = QMessageBox.question(

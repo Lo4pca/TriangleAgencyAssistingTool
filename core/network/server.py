@@ -14,6 +14,7 @@ class GMServer(QObject):
     player_connected = Signal(str, str)      # uid, ip
     player_disconnected = Signal(str)        # uid
     mission_report_received = Signal(str, dict) # uid, data
+    chat_received = Signal(dict)             # chat data
 
     def __init__(self, port: int = 12345, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -115,7 +116,6 @@ class GMServer(QObject):
             
         elif m_type == MsgType.LOG_SYNC:
             self.log_received.emit(data)
-            # 日志消息默认为公共消息，需转发给其他 PL
             self.broadcast(MsgType.LOG_SYNC, data, exclude=sender_socket)
             
         elif m_type == MsgType.SHEET_UPDATE:
@@ -126,6 +126,14 @@ class GMServer(QObject):
         
         elif m_type == MsgType.MISSION_REPORT:
             self.mission_report_received.emit(sender_uid, data)
+        
+        elif m_type == MsgType.CHAT:
+            target = data.get("target", "ALL")
+            if target == "ALL":
+                self.broadcast(MsgType.CHAT, data, exclude=sender_socket)
+            else:
+                self.send_to(target, MsgType.CHAT, data)
+            self.chat_received.emit(data)
     
     def broadcast(self, msg_type: MsgType, data: Any, exclude: Optional[QTcpSocket] = None) -> None:
         """向指定的或所有的活跃客户端广播消息"""

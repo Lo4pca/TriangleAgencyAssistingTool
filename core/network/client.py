@@ -17,6 +17,7 @@ class PLClient(QObject):
     file_received = Signal(str, str) # file_name, base64_content
     loose_ends_updated = Signal(int)
     mission_report_sync = Signal(dict)
+    chat_received = Signal(dict)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -89,6 +90,8 @@ class PLClient(QObject):
             self.loose_ends_updated.emit(val)
         elif m_type == MsgType.MISSION_REPORT:
             self.mission_report_sync.emit(val)
+        elif m_type == MsgType.CHAT:
+            self.chat_received.emit(val)
 
     def send(self, msg_type: MsgType, data: Any) -> None:
         """将数据打包并发送给 GM 服务端"""

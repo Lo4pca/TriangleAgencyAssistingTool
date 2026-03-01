@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTextEdit, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QHBoxLayout, QListWidget, QSpinBox, 
     QTabWidget, QFileDialog, QMessageBox, QSplitter,
-    QDialog, QListWidgetItem, QMenu, QInputDialog, QTextBrowser
+    QDialog, QListWidgetItem, QMenu, QInputDialog, QTextBrowser,
+    QComboBox, QLineEdit
 )
 from PySide6.QtGui import QAction, QDropEvent, QDragEnterEvent
 from PySide6.QtCore import Qt, QFileInfo, QSettings, QUrl
@@ -159,6 +160,7 @@ class GMMainWindow(QMainWindow):
         self.server.player_disconnected.connect(self.on_player_disconnected)
         self.server.sheet_received.connect(self.update_pl_sheet)
         self.server.mission_report_received.connect(self.on_mission_report_received)
+        self.server.chat_received.connect(lambda data: self.append_chat_message(data["sender"], data["text"]))
 
     def on_player_connected(self, uid: str, ip: str) -> None:
         self.log_system(f"新连接: {ip} (ID: {uid})")
@@ -325,6 +327,8 @@ class GMMainWindow(QMainWindow):
         
         self.log_dock.setWidget(log_container)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.log_dock)
+
+        self._init_chat_dock()
 
     def on_pl_double_clicked(self, item: QListWidgetItem) -> None:
         uid = item.data(Qt.UserRole)
@@ -518,6 +522,65 @@ class GMMainWindow(QMainWindow):
                 target_uid = info["uid"]
                 self.server.send_to(target_uid, MsgType.MISSION_REPORT, updated_data)
                 self.log_system(f"已更新报告并发送给 {info['name']} (评级: {updated_data.get('final_grade', '无')})")
+    
+    # ==========================================
+    # 聊天系统 UI 与逻辑
+    # ==========================================
+    def _init_chat_dock(self):
+        """初始化右下角的聊天窗口"""
+        self.chat_dock = QDockWidget("文字聊天", self)
+        self.chat_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
+        
+        container = QWidget()
+        layout = QVBoxLayout(container)
+        layout.setContentsMargins(5, 5, 5, 5)
+
+        self.chat_history = QTextBrowser()
+        layout.addWidget(self.chat_history)
+        
+        input_layout = QHBoxLayout()
+        self.chat_target_combo = QComboBox()
+        self.chat_target_combo.addItem("所有人 (公共)", "ALL") 
+        input_layout.addWidget(self.chat_target_combo)
+
+        self.chat_input = QLineEdit()
+        self.chat_input.setPlaceholderText("输入聊天内容...")
+        self.chat_input.returnPressed.connect(self.send_chat_message)
+        input_layout.addWidget(self.chat_input)
+
+        self.send_chat_btn = QPushButton("发送")
+        self.send_chat_btn.clicked.connect(self.send_chat_message)
+        input_layout.addWidget(self.send_chat_btn)
+        
+        layout.addLayout(input_layout)
+        self.chat_dock.setWidget(container)
+        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chat_dock)
+
+    def send_chat_message(self):
+        text = self.chat_input.text().strip()
+        if not text: return
+        
+        target = self.chat_target_combo.currentData()
+        sender_name = "GM"
+        
+        msg_data = {
+            "sender": sender_name,
+            "target": target,
+            "text": text
+        }
+
+        self.append_chat_message(sender_name, text)
+        self.server.broadcast(MsgType.CHAT, msg_data)
+        
+        self.chat_input.clear()
+
+    def append_chat_message(self, sender: str, text: str):
+        """将聊天信息渲染到面板上"""
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        color = "#C41E3A" if sender == "GM" else "#E9E1E1"
+        
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
+        self.chat_history.append(html)
 
     # ==========================
     # 代理与生命周期管理
