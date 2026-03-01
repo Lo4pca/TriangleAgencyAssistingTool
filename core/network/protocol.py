@@ -14,7 +14,8 @@ class MsgType(str, Enum):
     CHAT = "chat"                   # 聊天消息
 
 MAGIC=b"TAMG"
-HEADER_SIZE = len(MAGIC)+4
+MAGIC_LENGTH=len(MAGIC)
+HEADER_SIZE = MAGIC_LENGTH+4
 HEADER_FORMAT = '!I'
 
 def pack_msg(msg_type: MsgType, data: Any) -> bytes:

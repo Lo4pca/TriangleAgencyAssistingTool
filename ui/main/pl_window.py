@@ -50,7 +50,7 @@ class PLMainWindow(QMainWindow):
         self.update_connection_ui(False)
 
         self.client = PLClient()
-        self.proxy_process: Optional[subprocess.Popen] = None
+        self.pf_process: Optional[subprocess.Popen] = None
         self.setup_network()
     
     # ==========================
@@ -412,7 +412,7 @@ class PLMainWindow(QMainWindow):
 
             self.append_log("正在等待 gsocket 建立隧道 (约 2 秒)...")
             
-            # 使用简单的事件循环阻塞等待，保证与原版体验一致
+            # 使用简单的事件循环阻塞等待
             t_end = time.time() + 2
             while time.time() < t_end:
                 QApplication.processEvents()
@@ -426,10 +426,10 @@ class PLMainWindow(QMainWindow):
             self.stop_proxy()
 
     def stop_proxy(self) -> None:
-        if self.proxy_process:
+        if self.pf_process:
             try:
-                self.proxy_process.terminate()
-                self.proxy_process = None
+                self.pf_process.terminate()
+                self.pf_process = None
                 self.append_log("<i>已关闭本地代理进程</i>")
             except Exception as e:
                 self.append_log(f"<span style='color:red'>关闭本地代理进程时出错: {e}</span>")
