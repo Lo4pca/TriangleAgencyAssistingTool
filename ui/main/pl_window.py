@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTextBrowser, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QHBoxLayout, QSpinBox, QTabWidget,
     QMessageBox, QFileDialog, QTextEdit, QDialog, QFormLayout, 
-    QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox
+    QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox, QStackedWidget
 )
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import Qt, QTimer, QUrl, QFileInfo, QFile, QIODevice, QSettings
@@ -52,6 +52,8 @@ class PLMainWindow(QMainWindow):
         self.client = PLClient()
         self.pf_process: Optional[subprocess.Popen] = None
         self.setup_network()
+
+        self.players: Dict[str, str] = {}
     
     # ==========================
     # 网络协议处理与状态同步
@@ -62,7 +64,8 @@ class PLMainWindow(QMainWindow):
         self.client.file_received.connect(self.on_file_received)
         self.client.loose_ends_updated.connect(self.on_loose_ends_sync)
         self.client.mission_report_sync.connect(self.on_report_sync)
-        self.client.chat_received.connect(lambda data: self.append_chat_message(data["sender"], data["text"]))
+        self.client.chat_received.connect(self.on_client_chat_received)
+        self.client.players_updated.connect(self.on_players_updated)
 
         self.client.connected.connect(self.on_connected_success)
         self.client.disconnected.connect(self.on_disconnected)
@@ -166,12 +169,22 @@ class PLMainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(5, 5, 5, 5)
         
-        self.chat_history = QTextBrowser()
-        layout.addWidget(self.chat_history)
+        # 使用 QStackedWidget 管理多聊天浏览器
+        self.chat_stack = QStackedWidget()
+        self.chat_browsers: Dict[str, QTextBrowser] = {}
+
+        # 公共聊天
+        public_browser = QTextBrowser()
+        public_browser.setOpenLinks(False)
+        self.chat_browsers["ALL"] = public_browser
+        self.chat_stack.addWidget(public_browser)
+        layout.addWidget(self.chat_stack)
         
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
         self.chat_target_combo.addItem("所有人 (公共)", "ALL")
+        self.chat_target_combo.addItem("GM (私聊)", "GM")
+        self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
         
         self.chat_input = QLineEdit()
@@ -187,11 +200,68 @@ class PLMainWindow(QMainWindow):
         self.chat_dock.setWidget(container)
         self.splitDockWidget(self.log_dock, self.chat_dock, Qt.Horizontal)
 
+    def on_chat_target_changed(self, idx: int) -> None:
+        key = self.chat_target_combo.itemData(idx)
+        if key is None:
+            key = "ALL"
+        browser = self._ensure_chat_browser_for_key(key)
+        self.chat_stack.setCurrentWidget(browser)
+
+    def _ensure_chat_browser_for_key(self, key: str) -> QTextBrowser:
+        """确保存在以 key 标识的 QTextBrowser，PL 端 key 为 'ALL','GM' 或者对方名字"""
+        if key in self.chat_browsers:
+            return self.chat_browsers[key]
+        browser = QTextBrowser()
+        browser.setOpenLinks(False)
+        self.chat_browsers[key] = browser
+        self.chat_stack.addWidget(browser)
+        return browser
+
+    def on_players_updated(self, payload: dict) -> None:
+        """
+        payload 格式预期为 {"players": [{"uid": "...", "name": "..."}, ...]}
+        更新本地 self.players，刷新 chat_target_combo 项（以 uid 作为 itemData）。
+        """
+        players_list = payload.get("players", []) if isinstance(payload, dict) else []
+        new_map = {}
+        for entry in players_list:
+            uid = entry.get("uid")
+            name = entry.get("name", "Unknown")
+            if uid:
+                new_map[uid] = name
+        self.players = new_map
+        current_data = self.chat_target_combo.currentData()
+
+        # 清空并重建（保留 ALL, GM）
+        self.chat_target_combo.blockSignals(True)
+        self.chat_target_combo.clear()
+        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
+        self.chat_target_combo.addItem("GM (私聊)", "GM")
+
+        # 排序显示玩家（排除可能的重复名）
+        for uid, name in sorted(self.players.items(), key=lambda t: t[1].lower()):
+            if name!=self.character_data['name']:
+                self.chat_target_combo.addItem(name, uid)
+                self._ensure_chat_browser_for_key(uid)
+
+        # 恢复选择（如果可能）
+        # 如果之前的 current_data 仍存在于新的 combo，则尝试恢复，否则切换到 ALL 浏览器
+        idx_to_restore = 0
+        for i in range(self.chat_target_combo.count()):
+            if self.chat_target_combo.itemData(i) == current_data:
+                idx_to_restore = i
+                break
+        self.chat_target_combo.setCurrentIndex(idx_to_restore)
+        self.chat_stack.setCurrentWidget(self._ensure_chat_browser_for_key(current_data if current_data else "ALL"))
+        self.chat_target_combo.blockSignals(False)
+
     def send_chat_message(self):
         text = self.chat_input.text().strip()
         if not text: return
         
         target = self.chat_target_combo.currentData()
+        if target is None:
+            target = "ALL"
         sender_name = self.character_data.get("name", "Player")
         
         msg_data = {
@@ -200,13 +270,50 @@ class PLMainWindow(QMainWindow):
             "text": text
         }
         
+        browser = self._ensure_chat_browser_for_key(target)
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#E9E1E1;'>{sender_name}</b>: {text}"
+        browser.append(html)
+
+        # 通过网络发送给服务端（服务器会负责把消息发送到目标或广播）
         self.client.send(MsgType.CHAT, msg_data)
-        self.append_chat_message(sender_name,text)
         self.chat_input.clear()
 
-    def append_chat_message(self, sender: str, text: str):
-        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+    def on_client_chat_received(self, data: dict) -> None:
+        """
+        处理来自服务器的聊天消息。
+        公共消息 target == "ALL" -> 显示在公共浏览器。
+        私有消息（target != "ALL"） -> 在 PL 端以 from_uid（若有）或 sender 名字为 key 建立独立浏览器并显示。
+        """
+        target = data.get("target", "ALL")
+        sender = data.get("sender", "Unknown")
+        text = data.get("text", "")
+        from_uid = data.get("from_uid", None)
 
+        # 如果消息携带 from_uid 与 sender（当 PL 发给 PL 时，发送者名字 + uid 可用），更新本地 players 缓存以便后续 UI 显示
+        if from_uid and sender:
+            # 更新缓存（不会立即触发下拉刷新）
+            self.players[from_uid] = sender
+            # 确保下拉中存在该 uid 项（如果不存在则添加）
+            found = False
+            for i in range(self.chat_target_combo.count()):
+                if self.chat_target_combo.itemData(i) == from_uid:
+                    found = True
+                    # 若显示文本与缓存 name 不符，则更新显示文本
+                    if self.chat_target_combo.itemText(i) != sender:
+                        self.chat_target_combo.setItemText(i, sender)
+                    break
+            if not found:
+                # 在末尾添加该玩家项（避免打乱顺序）
+                self.chat_target_combo.addItem(sender, from_uid)
+                self._ensure_chat_browser_for_key(from_uid)
+
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        if target == "ALL":
+            key="ALL"
+        else:
+            key=from_uid or sender #GM没有from_uid
+        browser = self._ensure_chat_browser_for_key(key)
         my_name = self.character_data.get("name", "")
         if sender == "GM":
             color = "#C41E3A"
@@ -214,9 +321,8 @@ class PLMainWindow(QMainWindow):
             color = "#E9E1E1"
         else:
             color = "#006064"
-            
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
-        self.chat_history.append(html)
+        browser.append(html)
 
     # ==========================
     # UI 初始化

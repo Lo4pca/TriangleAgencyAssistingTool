@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QHBoxLayout, QListWidget, QSpinBox, 
     QTabWidget, QFileDialog, QMessageBox, QSplitter,
     QDialog, QListWidgetItem, QMenu, QInputDialog, QTextBrowser,
-    QComboBox, QLineEdit
+    QComboBox, QLineEdit, QStackedWidget
 )
 from PySide6.QtGui import QAction, QDropEvent, QDragEnterEvent
 from PySide6.QtCore import Qt, QFileInfo, QSettings, QUrl
@@ -160,7 +160,7 @@ class GMMainWindow(QMainWindow):
         self.server.player_disconnected.connect(self.on_player_disconnected)
         self.server.sheet_received.connect(self.update_pl_sheet)
         self.server.mission_report_received.connect(self.on_mission_report_received)
-        self.server.chat_received.connect(lambda data: self.append_chat_message(data["sender"], data["text"]))
+        self.server.chat_received.connect(self.on_server_chat_received)
 
     def on_player_connected(self, uid: str, ip: str) -> None:
         self.log_system(f"新连接: {ip} (ID: {uid})")
@@ -173,6 +173,9 @@ class GMMainWindow(QMainWindow):
             "sheet": {},
             "item": item
         }
+
+        self.chat_target_combo.addItem(item.text(), uid)
+        self._ensure_chat_browser_for_key(uid)
 
     def on_player_disconnected(self, uid: str) -> None:
         self.log_system(f"❌ 玩家断开: {self.players_data[uid]['name']} ({uid})")
@@ -196,6 +199,12 @@ class GMMainWindow(QMainWindow):
         player_record["name"] = name
         player_record["sheet"] = sheet_data
         item.setText(name)
+
+        # 同步更新聊天目标下拉框中对应项的显示文本（如果存在该 uid 的项）
+        for idx in range(self.chat_target_combo.count()):
+            if self.chat_target_combo.itemData(idx) == uid:
+                self.chat_target_combo.setItemText(idx, name)
+                break
 
         if old_name == "Unknown":
             self.log_system(f"接收到新角色卡: {name}")
@@ -527,7 +536,7 @@ class GMMainWindow(QMainWindow):
     # 聊天系统 UI 与逻辑
     # ==========================================
     def _init_chat_dock(self):
-        """初始化右下角的聊天窗口"""
+        """初始化右下角的聊天窗口（使用独立浏览器隔离每个对象的聊天）"""
         self.chat_dock = QDockWidget("文字聊天", self)
         self.chat_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
         
@@ -535,12 +544,22 @@ class GMMainWindow(QMainWindow):
         layout = QVBoxLayout(container)
         layout.setContentsMargins(5, 5, 5, 5)
 
-        self.chat_history = QTextBrowser()
-        layout.addWidget(self.chat_history)
+        self.chat_stack = QStackedWidget()
+        self.chat_browsers: Dict[str, QTextBrowser] = {}
+
+        # 公共聊天（ALL）
+        public_browser = QTextBrowser()
+        public_browser.setOpenLinks(False)
+        self.chat_browsers["ALL"] = public_browser
+        self.chat_stack.addWidget(public_browser)
+
+        layout.addWidget(self.chat_stack)
         
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
+        # 默认公共项
         self.chat_target_combo.addItem("所有人 (公共)", "ALL") 
+        self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
 
         self.chat_input = QLineEdit()
@@ -556,7 +575,25 @@ class GMMainWindow(QMainWindow):
         self.chat_dock.setWidget(container)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chat_dock)
 
-    def send_chat_message(self):
+    def on_chat_target_changed(self, idx: int) -> None:
+        data = self.chat_target_combo.itemData(idx)
+        key = data if data else "ALL"
+        # 如果对应浏览器不存在，先创建
+        browser = self._ensure_chat_browser_for_key(key)
+        # 切换到该浏览器
+        self.chat_stack.setCurrentWidget(browser)
+
+    def _ensure_chat_browser_for_key(self, key: str) -> QTextBrowser:
+        """确保存在以 key 标识的 QTextBrowser，若不存在则创建并加入 stack"""
+        if key in self.chat_browsers:
+            return self.chat_browsers[key]
+        browser = QTextBrowser()
+        browser.setOpenLinks(False)
+        self.chat_browsers[key] = browser
+        self.chat_stack.addWidget(browser)
+        return browser
+
+    def send_chat_message(self) -> None:
         text = self.chat_input.text().strip()
         if not text: return
         
@@ -569,18 +606,26 @@ class GMMainWindow(QMainWindow):
             "text": text
         }
 
-        self.append_chat_message(sender_name, text)
-        self.server.broadcast(MsgType.CHAT, msg_data)
-        
+        # 本地先显示到对应的浏览器（即时反馈）
+        browser = self._ensure_chat_browser_for_key(target)
+        time_str = datetime.datetime.now().strftime("%H:%M:%S")
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#C41E3A;'>GM</b>: {text}"
+        browser.append(html)
+
+        # 发送到网络：若目标为 ALL 则广播，否则点对点发送
+        if target == "ALL":
+            self.server.send_to_all(MsgType.CHAT, msg_data)
+        elif target != "GM":
+            self.server.send_to(target, MsgType.CHAT, msg_data)
         self.chat_input.clear()
 
-    def append_chat_message(self, sender: str, text: str):
-        """将聊天信息渲染到面板上"""
+    def on_server_chat_received(self, data: dict) -> None:
+        sender = data.get("sender", "Unknown")
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        color = "#C41E3A" if sender == "GM" else "#E9E1E1"
-        
-        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
-        self.chat_history.append(html)
+        browser = self._ensure_chat_browser_for_key(data['from_uid'])
+
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#E9E1E1;'>{sender}</b>: {data.get('text','')}"
+        browser.append(html)
 
     # ==========================
     # 代理与生命周期管理
