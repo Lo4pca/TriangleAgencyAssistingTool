@@ -140,14 +140,12 @@ class GMServer(QObject):
         elif m_type == MsgType.CHAT:
             target = data.get("target", "ALL")
             data["from_uid"] = sender_uid
-
-            if target == "ALL":
-                # 广播给所有 PL（排除原发送者）
-                self.broadcast(MsgType.CHAT, data, exclude=sender_socket)
-            elif target != "GM":
+            if target != "GM" and target!='ALL':
                 self.send_to(target, MsgType.CHAT, data)
-            else:
-                self.chat_received.emit(data)
+                return
+            if target == "ALL":
+                self.broadcast(MsgType.CHAT, data, exclude=sender_socket)
+            self.chat_received.emit(data)
 
     def _broadcast_player_list(self) -> None:
         """将当前在线玩家 uid/name 列表广播给所有连接的 PL"""

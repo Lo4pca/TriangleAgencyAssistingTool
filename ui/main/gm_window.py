@@ -140,6 +140,7 @@ class GMMainWindow(QMainWindow):
         # 缓存系统
         self.players_data: Dict[str, Dict[str, Any]] = {} 
         self.mission_reports_cache: Dict[str, Dict[str, Any]] = {}
+        self.uid_to_browser_key: Dict[str, str] = {}
         
         self.doc_window_count = 0
         self.pf_process: Optional[subprocess.Popen] = None
@@ -173,9 +174,8 @@ class GMMainWindow(QMainWindow):
             "sheet": {},
             "item": item
         }
-
-        self.chat_target_combo.addItem(item.text(), uid)
-        self._ensure_chat_browser_for_key(uid)
+        self.chat_target_combo.addItem("Unknown player",uid)
+        #以name作为选择browser的key，因此暂时不用uid创建browser
 
     def on_player_disconnected(self, uid: str) -> None:
         self.log_system(f"❌ 玩家断开: {self.players_data[uid]['name']} ({uid})")
@@ -183,7 +183,7 @@ class GMMainWindow(QMainWindow):
             row = self.pl_list.row(self.players_data[uid]['item'])
             if row != -1:
                 self.pl_list.takeItem(row)
-            # 注意：故意不在此处删除数据，以保留玩家离线时的最后状态
+            del self.players_data[uid] #无法恢复uid，数据留着也没用
 
     def update_pl_sheet(self, uid: str, name: str, sheet_data: Dict[str, Any]) -> None:
         if uid not in self.players_data:
@@ -201,10 +201,32 @@ class GMMainWindow(QMainWindow):
         item.setText(name)
 
         # 同步更新聊天目标下拉框中对应项的显示文本（如果存在该 uid 的项）
-        for idx in range(self.chat_target_combo.count()):
+        for idx in range(self.chat_target_combo.count()-1,-1,-1): #倒着遍历防止removeItem修改索引
             if self.chat_target_combo.itemData(idx) == uid:
                 self.chat_target_combo.setItemText(idx, name)
-                break
+            elif self.chat_target_combo.itemText(idx) == name:
+                self.chat_target_combo.removeItem(idx)
+
+        browser = self._ensure_chat_browser_for_key(name)
+        if uid in self.chat_browsers and self.chat_browsers[uid] is not browser: #用户在发送name之前发送了消息，需要迁移原本的记录
+            old_browser = self.chat_browsers.pop(uid)
+            try:
+                # 将旧浏览器的 HTML 内容导入到名字浏览器（尽量保留原样式）
+                old_html = old_browser.toHtml()
+                browser.insertHtml(old_html)
+                browser.append("")  # 追加换行
+            except Exception:
+                # 退而求其次，合并纯文本
+                browser.append(old_browser.toPlainText())
+                self.log_system("合并HTML聊天记录时出错，回退到合并纯文本")
+            # 从 stack 中移除并销毁旧的 uid 浏览器
+            try:
+                self.chat_stack.removeWidget(old_browser)
+                old_browser.deleteLater()
+            except Exception:
+                self.log_system("移除聊天浏览器时出错")
+        # 映射 uid -> name_key
+        self.uid_to_browser_key[uid] = name
 
         if old_name == "Unknown":
             self.log_system(f"接收到新角色卡: {name}")
@@ -558,7 +580,7 @@ class GMMainWindow(QMainWindow):
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
         # 默认公共项
-        self.chat_target_combo.addItem("所有人 (公共)", "ALL") 
+        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
         self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
 
@@ -576,10 +598,9 @@ class GMMainWindow(QMainWindow):
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chat_dock)
 
     def on_chat_target_changed(self, idx: int) -> None:
-        data = self.chat_target_combo.itemData(idx)
-        key = data if data else "ALL"
+        key = self.chat_target_combo.itemData(idx)
         # 如果对应浏览器不存在，先创建
-        browser = self._ensure_chat_browser_for_key(key)
+        browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(key,key))
         # 切换到该浏览器
         self.chat_stack.setCurrentWidget(browser)
 
@@ -607,7 +628,7 @@ class GMMainWindow(QMainWindow):
         }
 
         # 本地先显示到对应的浏览器（即时反馈）
-        browser = self._ensure_chat_browser_for_key(target)
+        browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(target,target))
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#C41E3A;'>GM</b>: {text}"
         browser.append(html)
@@ -622,8 +643,11 @@ class GMMainWindow(QMainWindow):
     def on_server_chat_received(self, data: dict) -> None:
         sender = data.get("sender", "Unknown")
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        browser = self._ensure_chat_browser_for_key(data['from_uid'])
-
+        if data['target']=='ALL':
+            browser = self._ensure_chat_browser_for_key('ALL')
+        else:
+            from_uid=data['from_uid']
+            browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(from_uid,from_uid))
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#E9E1E1;'>{sender}</b>: {data.get('text','')}"
         browser.append(html)
 
