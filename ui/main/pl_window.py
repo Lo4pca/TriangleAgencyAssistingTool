@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (
     QMainWindow, QDockWidget, QTextBrowser, QWidget, QVBoxLayout, 
     QLabel, QPushButton, QHBoxLayout, QSpinBox, QTabWidget,
     QMessageBox, QFileDialog, QTextEdit, QDialog, QFormLayout, 
-    QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox, QStackedWidget
+    QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox, QStackedWidget,
+    QScrollArea
 )
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import Qt, QTimer, QUrl, QFileInfo, QFile, QIODevice, QSettings
@@ -19,6 +20,7 @@ from PySide6.QtCore import Qt, QTimer, QUrl, QFileInfo, QFile, QIODevice, QSetti
 from ui.character.editor import CharacterEditor
 from ui.tools.dice_tool import DiceTool
 from ui.tools.mission_report import MissionReportDialog
+from ui.common.widgets import TeammateStatusWidget
 from core.network.client import PLClient
 from core.network.protocol import MsgType
 
@@ -255,6 +257,10 @@ class PLMainWindow(QMainWindow):
         self.chat_stack.setCurrentWidget(self._ensure_chat_browser_for_key(current_data if current_data else "ALL"))
         self.chat_target_combo.blockSignals(False)
 
+        #更新队友状态
+        my_name = self.character_data.get("name", "Unknown PL")
+        self.teammate_status_widget.update_status(players_list, my_name)
+
     def send_chat_message(self):
         text = self.chat_input.text().strip()
         if not text: return
@@ -439,6 +445,20 @@ class PLMainWindow(QMainWindow):
         self.notes_dock.setWidget(notes_container)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.notes_dock)
         self.view_menu.addAction(self.notes_dock.toggleViewAction())
+
+        # --- 3. Teammate Status Dock ---
+        self.teammate_dock = QDockWidget("队友状态", self)
+        self.teammate_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
+        self.teammate_dock.setMinimumWidth(120)
+        
+        scroll = QScrollArea()
+        scroll.setWidgetResizable(True)
+        self.teammate_status_widget = TeammateStatusWidget()
+        scroll.setWidget(self.teammate_status_widget)
+        
+        self.teammate_dock.setWidget(scroll)
+        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.teammate_dock)
+        self.view_menu.addAction(self.teammate_dock.toggleViewAction())
 
     # ==========================
     # 文件 I/O 与 本地代理

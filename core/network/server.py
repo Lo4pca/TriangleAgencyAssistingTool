@@ -130,6 +130,15 @@ class GMServer(QObject):
             new_name = data.get("name", "Unknown")
             sheet_content = data.get("sheet", {})
             self.clients[sender_socket]["name"] = new_name
+
+            qas = sheet_content.get("quality_assurances", {})
+            public_status = {
+                "qas": {k: f"{v.get('current', 0)}/{v.get('max', 0)}" for k, v in qas.items()},
+                "anomaly": sheet_content.get("anomaly", "未知的异常能力"),
+                "reality": sheet_content.get("reality","未知的现实身份"),
+                "competency": sheet_content.get("competency","未知的职能")
+            }
+            self.clients[sender_socket]["public_status"] = public_status
             self.sheet_received.emit(sender_uid, new_name, sheet_content)
             # 广播最新在线玩家列表（用于 PL 更新下拉列表）
             self._broadcast_player_list()
@@ -151,7 +160,11 @@ class GMServer(QObject):
         """将当前在线玩家 uid/name 列表广播给所有连接的 PL"""
         lst: List[Dict[str, str]] = []
         for ctx in self.clients.values():
-            lst.append({"uid": ctx.get("uid"), "name": ctx.get("name", "Unknown")})
+            lst.append({
+                "uid": ctx.get("uid"), 
+                "name": ctx.get("name", "Unknown"),
+                "public_status": ctx.get("public_status", {})
+            })
         payload = {"players": lst}
         self.broadcast(MsgType.PLAYER_LIST, payload)
 
