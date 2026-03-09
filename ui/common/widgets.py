@@ -4,6 +4,7 @@ from PySide6.QtWidgets import (
     QHBoxLayout, QGridLayout, QLineEdit, QTextEdit, QCheckBox
 )
 from PySide6.QtCore import Qt, Signal
+from models.static_data import QUALITY_ASSURANCES
 
 def create_label(text: str, class_name: Optional[str] = None, style: Optional[str] = None) -> QLabel:
     lbl = QLabel(text)
@@ -502,12 +503,13 @@ class TeammateStatusWidget(QWidget):
             flayout.addWidget(name_lbl)
 
             flayout.addWidget(QLabel(f"<span style='color:gray;'>异常能力:</span> {status.get('anomaly', '未知的异常能力')}"))
-            flayout.addWidget(QLabel(f"<span style='color:gray;'>现实身份:</span> {status.get('anomaly', '未知的现实身份')}"))
+            flayout.addWidget(QLabel(f"<span style='color:gray;'>现实身份:</span> {status.get('reality', '未知的现实身份')}"))
             flayout.addWidget(QLabel(f"<span style='color:gray;'>公司职能:</span> {status.get('competency', '未知的职能')}"))
             
             # QA状态 (当前/最大)
             qas = status.get("qas", {})
             for k, v in qas.items():
-                flayout.addWidget(QLabel(f"<span style='color:gray;'>{k}:</span> {v}"))
+                if v[-1]!='0':
+                    flayout.addWidget(QLabel(f"<span style='color:gray;'>{QUALITY_ASSURANCES[k]}:</span> {v}"))
                 
             self.layout.addWidget(frame)

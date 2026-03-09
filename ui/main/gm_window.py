@@ -580,7 +580,7 @@ class GMMainWindow(QMainWindow):
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
         # 默认公共项
-        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
+        self.chat_target_combo.addItem("ALL", "ALL")
         self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
 
@@ -648,7 +648,7 @@ class GMMainWindow(QMainWindow):
         else:
             from_uid=data['from_uid']
             browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(from_uid,from_uid))
-        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#E9E1E1;'>{sender}</b>: {data.get('text','')}"
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#F3A455;'>{sender}</b>: {data.get('text','')}"
         browser.append(html)
 
     # ==========================

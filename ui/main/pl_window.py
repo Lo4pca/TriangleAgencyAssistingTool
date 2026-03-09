@@ -184,8 +184,8 @@ class PLMainWindow(QMainWindow):
         
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
-        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
-        self.chat_target_combo.addItem("GM (私聊)", "GM")
+        self.chat_target_combo.addItem("ALL", "ALL")
+        self.chat_target_combo.addItem("GM", "GM")
         self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
         
@@ -203,9 +203,7 @@ class PLMainWindow(QMainWindow):
         self.splitDockWidget(self.log_dock, self.chat_dock, Qt.Horizontal)
 
     def on_chat_target_changed(self, idx: int) -> None:
-        key = self.chat_target_combo.itemData(idx)
-        if key is None:
-            key = "ALL"
+        key = self.chat_target_combo.itemText(idx)
         browser = self._ensure_chat_browser_for_key(key)
         self.chat_stack.setCurrentWidget(browser)
 
@@ -237,14 +235,14 @@ class PLMainWindow(QMainWindow):
         # 清空并重建（保留 ALL, GM）
         self.chat_target_combo.blockSignals(True)
         self.chat_target_combo.clear()
-        self.chat_target_combo.addItem("所有人 (公共)", "ALL")
-        self.chat_target_combo.addItem("GM (私聊)", "GM")
+        self.chat_target_combo.addItem("ALL", "ALL")
+        self.chat_target_combo.addItem("GM", "GM")
 
         # 排序显示玩家（排除可能的重复名）
         for uid, name in sorted(self.players.items(), key=lambda t: t[1].lower()):
-            if name!=self.character_data['name']:
+            if name!=self.character_data.get('name',None):
                 self.chat_target_combo.addItem(name, uid)
-                self._ensure_chat_browser_for_key(uid)
+                self._ensure_chat_browser_for_key(name)
 
         # 恢复选择（如果可能）
         # 如果之前的 current_data 仍存在于新的 combo，则尝试恢复，否则切换到 ALL 浏览器
@@ -254,7 +252,7 @@ class PLMainWindow(QMainWindow):
                 idx_to_restore = i
                 break
         self.chat_target_combo.setCurrentIndex(idx_to_restore)
-        self.chat_stack.setCurrentWidget(self._ensure_chat_browser_for_key(current_data if current_data else "ALL"))
+        self.chat_stack.setCurrentWidget(self._ensure_chat_browser_for_key(self.chat_target_combo.currentText()))
         self.chat_target_combo.blockSignals(False)
 
         #更新队友状态
@@ -275,10 +273,10 @@ class PLMainWindow(QMainWindow):
             "target": target,
             "text": text
         }
-        
-        browser = self._ensure_chat_browser_for_key(target)
+
+        browser = self._ensure_chat_browser_for_key(self.chat_target_combo.currentText())
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#E9E1E1;'>{sender_name}</b>: {text}"
+        html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#5DB7D7;'>{sender_name}</b>: {text}"
         browser.append(html)
 
         # 通过网络发送给服务端（服务器会负责把消息发送到目标或广播）
@@ -289,7 +287,7 @@ class PLMainWindow(QMainWindow):
         """
         处理来自服务器的聊天消息。
         公共消息 target == "ALL" -> 显示在公共浏览器。
-        私有消息（target != "ALL"） -> 在 PL 端以 from_uid（若有）或 sender 名字为 key 建立独立浏览器并显示。
+        私有消息（target != "ALL"） -> 在 PL 端以 sender 名字为 key 建立独立浏览器并显示。
         """
         target = data.get("target", "ALL")
         sender = data.get("sender", "Unknown")
@@ -312,21 +310,18 @@ class PLMainWindow(QMainWindow):
             if not found:
                 # 在末尾添加该玩家项（避免打乱顺序）
                 self.chat_target_combo.addItem(sender, from_uid)
-                self._ensure_chat_browser_for_key(from_uid)
+                self._ensure_chat_browser_for_key(sender)
 
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
         if target == "ALL":
             key="ALL"
         else:
-            key=from_uid or sender #GM没有from_uid
+            key=sender
         browser = self._ensure_chat_browser_for_key(key)
-        my_name = self.character_data.get("name", "")
         if sender == "GM":
             color = "#C41E3A"
-        elif sender == my_name:
-            color = "#E9E1E1"
         else:
-            color = "#006064"
+            color = "#F3A455"
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
         browser.append(html)
 
