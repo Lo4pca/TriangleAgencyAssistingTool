@@ -144,6 +144,7 @@ class GMMainWindow(QMainWindow):
         
         self.doc_window_count = 0
         self.pf_process: Optional[subprocess.Popen] = None
+        self.unread_uids = set()
 
         self._init_menu()
         self._init_ui()
@@ -596,12 +597,35 @@ class GMMainWindow(QMainWindow):
         layout.addLayout(input_layout)
         self.chat_dock.setWidget(container)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chat_dock)
+    
+    def refresh_pl_list_and_dock_ui(self):
+        for i in range(self.pl_list.count()):
+            item = self.pl_list.item(i)
+            uid = item.data(Qt.UserRole)
+            p_data = self.players_data.get(uid)
+            if not p_data: continue
+            
+            base_name = p_data.get("name", "Unknown")
+            if uid in self.unread_uids:
+                item.setText(f"💬 {base_name} [新消息]")
+                item.setForeground(Qt.GlobalColor.red)
+            else:
+                item.setText(base_name)
+                item.setForeground(Qt.GlobalColor.black)
+
+        if self.unread_uids:
+            self.chat_dock.setWindowTitle("文字聊天 🔴 有新消息")
+        else:
+            self.chat_dock.setWindowTitle("文字聊天")
 
     def on_chat_target_changed(self, idx: int) -> None:
         key = self.chat_target_combo.itemData(idx)
-        # 如果对应浏览器不存在，先创建
-        browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(key,key))
-        # 切换到该浏览器
+
+        if key in self.unread_uids:
+            self.unread_uids.remove(key)
+            self.refresh_pl_list_and_dock_ui()
+            
+        browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(key, key))
         self.chat_stack.setCurrentWidget(browser)
 
     def _ensure_chat_browser_for_key(self, key: str) -> QTextBrowser:
@@ -643,11 +667,14 @@ class GMMainWindow(QMainWindow):
     def on_server_chat_received(self, data: dict) -> None:
         sender = data.get("sender", "Unknown")
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
-        if data['target']=='ALL':
+        if data['target'] == 'ALL':
             browser = self._ensure_chat_browser_for_key('ALL')
         else:
-            from_uid=data['from_uid']
-            browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(from_uid,from_uid))
+            from_uid = data['from_uid']
+            browser = self._ensure_chat_browser_for_key(self.uid_to_browser_key.get(from_uid, from_uid))
+            if self.chat_target_combo.currentData() != from_uid:
+                self.unread_uids.add(from_uid)
+                self.refresh_pl_list_and_dock_ui()
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#F3A455;'>{sender}</b>: {data.get('text','')}"
         browser.append(html)
 

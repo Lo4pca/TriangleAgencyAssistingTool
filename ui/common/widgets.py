@@ -473,13 +473,19 @@ class CustomTrackCard(BaseCard):
 
 class TeammateStatusWidget(QWidget):
     """用于展示队友公开状态的纯 UI 组件"""
+    
+    # 向上传递被点击的玩家 UID
+    jump_chat_signal = Signal(str) 
+
     def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.layout = QVBoxLayout(self)
         self.layout.setContentsMargins(0, 0, 0, 0)
         self.layout.setAlignment(Qt.AlignmentFlag.AlignTop)
 
-    def update_status(self, players_list: list, my_name: str) -> None:
+    def update_status(self, players_list: list, my_name: str, unread_uids: set = None) -> None:
+        if unread_uids is None: unread_uids = set()
+        
         # 清空旧组件
         while self.layout.count():
             child = self.layout.takeAt(0)
@@ -488,28 +494,38 @@ class TeammateStatusWidget(QWidget):
                 
         for p in players_list:
             name = p.get("name", "Unknown")
+            uid = p.get("uid", "")
             if name == my_name:
                 continue # 不展示自己
                 
             status = p.get("public_status", {})
             
-            # 创建单个玩家的容器
             frame = QFrame()
             frame.setFrameShape(QFrame.Shape.StyledPanel)
             flayout = QVBoxLayout(frame)
             flayout.setContentsMargins(5, 5, 5, 5)
             
-            name_lbl = QLabel(f"<b>{name}</b>")
-            flayout.addWidget(name_lbl)
+            # 头部布局：名字 + 动态未读按钮
+            header_layout = QHBoxLayout()
+            header_layout.addWidget(QLabel(f"<b>{name}</b>"))
+            
+            if uid in unread_uids:
+                msg_btn = QPushButton("💬 新消息")
+                msg_btn.setStyleSheet("background-color: #E53935; color: white; border-radius: 4px; padding: 2px 6px; font-weight: bold;")
+                # 发射信号通知主窗口跳转
+                msg_btn.clicked.connect(lambda _, u=uid: self.jump_chat_signal.emit(u))
+                header_layout.addWidget(msg_btn)
+                
+            header_layout.addStretch()
+            flayout.addLayout(header_layout)
 
             flayout.addWidget(QLabel(f"<span style='color:gray;'>异常能力:</span> {status.get('anomaly', '未知的异常能力')}"))
             flayout.addWidget(QLabel(f"<span style='color:gray;'>现实身份:</span> {status.get('reality', '未知的现实身份')}"))
             flayout.addWidget(QLabel(f"<span style='color:gray;'>公司职能:</span> {status.get('competency', '未知的职能')}"))
             
-            # QA状态 (当前/最大)
             qas = status.get("qas", {})
             for k, v in qas.items():
-                if v[-1]!='0':
+                if v[-1] != '0':
                     flayout.addWidget(QLabel(f"<span style='color:gray;'>{QUALITY_ASSURANCES[k]}:</span> {v}"))
                 
             self.layout.addWidget(frame)

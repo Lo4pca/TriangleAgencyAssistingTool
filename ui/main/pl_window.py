@@ -56,6 +56,8 @@ class PLMainWindow(QMainWindow):
         self.setup_network()
 
         self.players: Dict[str, str] = {}
+        self.full_players_list = []
+        self.unread_uids = set()
     
     # ==========================
     # 网络协议处理与状态同步
@@ -201,10 +203,23 @@ class PLMainWindow(QMainWindow):
         layout.addLayout(input_layout)
         self.chat_dock.setWidget(container)
         self.splitDockWidget(self.log_dock, self.chat_dock, Qt.Horizontal)
+    
+    def jump_to_chat(self, target_uid: str):
+        """从队友列表点击新消息后，自动跳转并聚焦"""
+        idx = self.chat_target_combo.findData(target_uid)
+        if idx >= 0:
+            self.chat_target_combo.setCurrentIndex(idx)
+        self.chat_dock.raise_()
+        self.chat_input.setFocus()
 
     def on_chat_target_changed(self, idx: int) -> None:
-        key = self.chat_target_combo.itemText(idx)
-        browser = self._ensure_chat_browser_for_key(key)
+        key_data = self.chat_target_combo.itemData(idx)
+        if key_data in self.unread_uids:
+            self.unread_uids.remove(key_data)
+            self.refresh_teammate_and_dock_ui()
+            
+        key_name = self.chat_target_combo.itemText(idx).replace(" [未读]", "")
+        browser = self._ensure_chat_browser_for_key(key_name)
         self.chat_stack.setCurrentWidget(browser)
 
     def _ensure_chat_browser_for_key(self, key: str) -> QTextBrowser:
@@ -217,47 +232,48 @@ class PLMainWindow(QMainWindow):
         self.chat_stack.addWidget(browser)
         return browser
 
-    def on_players_updated(self, payload: dict) -> None:
-        """
-        payload 格式预期为 {"players": [{"uid": "...", "name": "..."}, ...]}
-        更新本地 self.players，刷新 chat_target_combo 项（以 uid 作为 itemData）。
-        """
-        players_list = payload.get("players", []) if isinstance(payload, dict) else []
-        new_map = {}
-        for entry in players_list:
-            uid = entry.get("uid")
-            name = entry.get("name", "Unknown")
-            if uid:
-                new_map[uid] = name
-        self.players = new_map
+    def refresh_teammate_and_dock_ui(self):
+        """统一更新 UI，保持数据和视图同步"""
+        my_name = self.character_data.get("name", "Unknown PL")
+        # 1. 更新队友面板红点
+        self.teammate_status_widget.update_status(self.full_players_list, my_name, self.unread_uids)
+        
+        # 2. 更新 Dock 标题 (处理 GM 发来的消息或被折叠的情况)
+        if self.unread_uids:
+            self.chat_dock.setWindowTitle("文字聊天 🔴 有新消息")
+        else:
+            self.chat_dock.setWindowTitle("文字聊天")
+            
+        # 3. 更新下拉框里的文本
         current_data = self.chat_target_combo.currentData()
-
-        # 清空并重建（保留 ALL, GM）
         self.chat_target_combo.blockSignals(True)
         self.chat_target_combo.clear()
+        
+        gm_label = "GM [未读]" if "GM" in self.unread_uids else "GM"
         self.chat_target_combo.addItem("ALL", "ALL")
-        self.chat_target_combo.addItem("GM", "GM")
-
-        # 排序显示玩家（排除可能的重复名）
+        self.chat_target_combo.addItem(gm_label, "GM")
+        
         for uid, name in sorted(self.players.items(), key=lambda t: t[1].lower()):
-            if name!=self.character_data.get('name',None):
-                self.chat_target_combo.addItem(name, uid)
-                self._ensure_chat_browser_for_key(name)
-
-        # 恢复选择（如果可能）
-        # 如果之前的 current_data 仍存在于新的 combo，则尝试恢复，否则切换到 ALL 浏览器
-        idx_to_restore = 0
-        for i in range(self.chat_target_combo.count()):
-            if self.chat_target_combo.itemData(i) == current_data:
-                idx_to_restore = i
-                break
-        self.chat_target_combo.setCurrentIndex(idx_to_restore)
-        self.chat_stack.setCurrentWidget(self._ensure_chat_browser_for_key(self.chat_target_combo.currentText()))
+            if name != my_name:
+                display_name = f"{name} [未读]" if uid in self.unread_uids else name
+                self.chat_target_combo.addItem(display_name, uid)
+                
+        idx = self.chat_target_combo.findData(current_data)
+        self.chat_target_combo.setCurrentIndex(idx if idx >= 0 else 0)
         self.chat_target_combo.blockSignals(False)
 
-        #更新队友状态
-        my_name = self.character_data.get("name", "Unknown PL")
-        self.teammate_status_widget.update_status(players_list, my_name)
+    def on_players_updated(self, payload: dict) -> None:
+        self.full_players_list = payload.get("players", []) if isinstance(payload, dict) else [] #full_players_list是完整的玩家列表，带有public_status，用于给widgets渲染状态
+        new_map = {}
+        for entry in self.full_players_list:
+            uid = entry.get("uid")
+            if uid: new_map[uid] = entry.get("name", "Unknown")
+        self.players = new_map #而players只有uid与name的映射
+        #但是似乎将两者合并也可以？
+        for name in self.players.values():
+            self._ensure_chat_browser_for_key(name)
+
+        self.refresh_teammate_and_dock_ui()
 
     def send_chat_message(self):
         text = self.chat_input.text().strip()
@@ -294,23 +310,14 @@ class PLMainWindow(QMainWindow):
         text = data.get("text", "")
         from_uid = data.get("from_uid", None)
 
-        # 如果消息携带 from_uid 与 sender（当 PL 发给 PL 时，发送者名字 + uid 可用），更新本地 players 缓存以便后续 UI 显示
         if from_uid and sender:
-            # 更新缓存（不会立即触发下拉刷新）
             self.players[from_uid] = sender
-            # 确保下拉中存在该 uid 项（如果不存在则添加）
-            found = False
-            for i in range(self.chat_target_combo.count()):
-                if self.chat_target_combo.itemData(i) == from_uid:
-                    found = True
-                    # 若显示文本与缓存 name 不符，则更新显示文本
-                    if self.chat_target_combo.itemText(i) != sender:
-                        self.chat_target_combo.setItemText(i, sender)
-                    break
-            if not found:
-                # 在末尾添加该玩家项（避免打乱顺序）
-                self.chat_target_combo.addItem(sender, from_uid)
-                self._ensure_chat_browser_for_key(sender)
+            self._ensure_chat_browser_for_key(sender)
+        
+        sender_data_key = "GM" if sender == "GM" else from_uid
+        if target != "ALL" and self.chat_target_combo.currentData() != sender_data_key:
+            self.unread_uids.add(sender_data_key)
+            self.refresh_teammate_and_dock_ui()
 
         time_str = datetime.datetime.now().strftime("%H:%M:%S")
         if target == "ALL":
@@ -449,6 +456,7 @@ class PLMainWindow(QMainWindow):
         scroll = QScrollArea()
         scroll.setWidgetResizable(True)
         self.teammate_status_widget = TeammateStatusWidget()
+        self.teammate_status_widget.jump_chat_signal.connect(self.jump_to_chat)
         scroll.setWidget(self.teammate_status_widget)
         
         self.teammate_dock.setWidget(scroll)
