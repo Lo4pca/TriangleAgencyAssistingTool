@@ -31,6 +31,7 @@ from ui.common.styles import GLOBAL_STYLE_SHEET
 from ui.tools.weather_tool import WeatherTool
 from ui.tools.dice_tool import DiceTool
 from ui.tools.mission_report import MissionReportDialog
+from ui.common.dialogs import show_silent_info
 
 
 class DragDropEditor(QTextEdit):
@@ -150,6 +151,10 @@ class GMMainWindow(QMainWindow):
         self._init_ui()
         self.setup_server_signals()
 
+        self._default_layout_state = self.saveState()
+        self._default_geometry = self.saveGeometry()
+        self.restore_window_layout()
+
         self.net_update = True
 
     # ==========================
@@ -248,11 +253,20 @@ class GMMainWindow(QMainWindow):
         open_action.triggered.connect(self.manual_open_file)
         file_menu.addAction(open_action)
 
-        view_menu = menubar.addMenu("视图")
+        self.view_menu = menubar.addMenu("视图")
         new_doc_action = QAction("新建文档窗口", self)
         new_doc_action.setShortcut("Ctrl+N")
         new_doc_action.triggered.connect(self.create_doc_window)
-        view_menu.addAction(new_doc_action)
+        self.view_menu.addAction(new_doc_action)
+
+        self.view_menu.addSeparator()
+        save_layout_act = QAction("保存当前布局", self)
+        save_layout_act.triggered.connect(self.save_window_layout)
+        self.view_menu.addAction(save_layout_act)
+        
+        reset_layout_act = QAction("重置为默认布局", self)
+        reset_layout_act.triggered.connect(self.reset_window_layout)
+        self.view_menu.addAction(reset_layout_act)
 
         config_menu = menubar.addMenu("配置")
         pf_action = QAction("设置端口转发命令...", self)
@@ -275,6 +289,7 @@ class GMMainWindow(QMainWindow):
         self.setCentralWidget(self.main_doc_viewer)
 
         self.left_dock = QDockWidget("GM 控制台", self)
+        self.left_dock.setObjectName("GM_controller")
         self.left_dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
         left_container = QWidget()
         left_layout = QVBoxLayout(left_container)
@@ -339,6 +354,7 @@ class GMMainWindow(QMainWindow):
 
         # --- Right Dock: Logs ---
         self.log_dock = QDockWidget("公共日志 & 混沌", self)
+        self.log_dock.setObjectName("GM_public_logs")
         self.log_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
         log_container = QWidget()
@@ -561,6 +577,7 @@ class GMMainWindow(QMainWindow):
     def _init_chat_dock(self):
         """初始化右下角的聊天窗口（使用独立浏览器隔离每个对象的聊天）"""
         self.chat_dock = QDockWidget("文字聊天", self)
+        self.chat_dock.setObjectName("GM_text_chat")
         self.chat_dock.setAllowedAreas(Qt.DockWidgetArea.RightDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
         
         container = QWidget()
@@ -580,10 +597,14 @@ class GMMainWindow(QMainWindow):
         
         input_layout = QHBoxLayout()
         self.chat_target_combo = QComboBox()
-        # 默认公共项
         self.chat_target_combo.addItem("ALL", "ALL")
         self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
+
+        self.export_chat_btn = QPushButton("导出")
+        self.export_chat_btn.setToolTip("导出聊天记录")
+        self.export_chat_btn.clicked.connect(self.show_chat_export_menu)
+        input_layout.addWidget(self.export_chat_btn)
 
         self.chat_input = QLineEdit()
         self.chat_input.setPlaceholderText("输入聊天内容...")
@@ -598,6 +619,42 @@ class GMMainWindow(QMainWindow):
         self.chat_dock.setWidget(container)
         self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.chat_dock)
     
+    def show_chat_export_menu(self):
+        menu = QMenu(self)
+        cur_act = menu.addAction("导出当前频道记录")
+        all_act = menu.addAction("导出所有频道记录")
+        
+        action = menu.exec(self.export_chat_btn.mapToGlobal(self.export_chat_btn.rect().bottomLeft()))
+        self.export_chat_history(all_channels=(action == all_act))
+    
+    def export_chat_history(self, all_channels: bool):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        
+        if all_channels:
+            content = ""
+            for key, browser in self.chat_browsers.items():
+                content += f"=== 频道: {key} ===\n"
+                content += browser.toPlainText() + "\n\n"
+            default_name = f"{self.game_name}_all_chats_{timestamp}.txt"
+        else:
+            browser = self.chat_stack.currentWidget()
+            key_name = self.chat_target_combo.currentText()
+            content = f"=== 频道: {key_name} ===\n" + browser.toPlainText()
+            default_name = f"{self.game_name}_{key_name}_chat_{timestamp}.txt"
+            
+        if not content.strip():
+            show_silent_info(self, "提示", "聊天记录为空，无需导出。")
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(self, "导出聊天记录", default_name, "Text Files (*.txt);;All Files (*)")
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.log_system(f"聊天记录已导出至: {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "导出失败", str(e))
+    
     def refresh_pl_list_and_dock_ui(self):
         for i in range(self.pl_list.count()):
             item = self.pl_list.item(i)
@@ -611,7 +668,7 @@ class GMMainWindow(QMainWindow):
                 item.setForeground(Qt.GlobalColor.red)
             else:
                 item.setText(base_name)
-                item.setForeground(Qt.GlobalColor.black)
+                item.setForeground(Qt.GlobalColor.white)
 
         if self.unread_uids:
             self.chat_dock.setWindowTitle("文字聊天 🔴 有新消息")
@@ -677,6 +734,29 @@ class GMMainWindow(QMainWindow):
                 self.refresh_pl_list_and_dock_ui()
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:#F3A455;'>{sender}</b>: {data.get('text','')}"
         browser.append(html)
+    
+    # ==========================
+    # 布局持久化
+    # ==========================
+    def save_window_layout(self):
+        settings = QSettings("TA_Assistant", "GM_Layouts")
+        settings.setValue("dock_state", self.saveState())
+        settings.setValue("window_geometry", self.saveGeometry())
+        show_silent_info(self, "布局已保存", "下次启动时将自动恢复当前的窗口位置和面板布局。")
+
+    def reset_window_layout(self):
+        self.restoreState(self._default_layout_state)
+        self.restoreGeometry(self._default_geometry)
+        settings = QSettings("TA_Assistant", "GM_Layouts")
+        settings.remove("dock_state")
+        settings.remove("window_geometry")
+
+    def restore_window_layout(self):
+        settings = QSettings("TA_Assistant", "GM_Layouts")
+        state = settings.value("dock_state")
+        geo = settings.value("window_geometry")
+        if state: self.restoreState(state)
+        if geo: self.restoreGeometry(geo)
 
     # ==========================
     # 代理与生命周期管理

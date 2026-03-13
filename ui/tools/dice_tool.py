@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from ui.common.dialogs import show_info, show_warning
+from ui.common.dialogs import show_silent_info, show_warning
 from models.static_data import QUALITY_ASSURANCES, HIDDEN_DICE_DB
 
 # ==========================================
@@ -263,10 +263,10 @@ class HiddenDiceConfigDialog(QDialog):
                 self.unlocked.add(code)
                 self.enabled.add(code)
                 self.refresh_list()
-                show_info(self, "访问许可", f"暗骰 [{HIDDEN_DICE_DB[code]['name']}] 已解锁")
+                show_silent_info(self, "访问许可", f"暗骰 [{HIDDEN_DICE_DB[code]['name']}] 已解锁")
                 self.code_input.clear()
             else:
-                show_info(self, "提示", "该内容已解锁")
+                show_silent_info(self, "提示", "该内容已解锁")
         else:
             show_warning(self, "拒绝访问", "无效的代码")
 
@@ -286,7 +286,7 @@ class HiddenDiceConfigDialog(QDialog):
             code = item.data(Qt.UserRole)
             info = HIDDEN_DICE_DB.get(code)
             if info:
-                show_info(self,info['name'],f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
+                show_silent_info(self,info['name'],f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
 
     def get_results(self) -> Tuple[List[str], List[str]]:
         final_enabled = []
@@ -638,7 +638,7 @@ class DiceTool(QDialog):
         if info:
             #避免使用QMessageBox.information()，因其内部用的是exec
             #open() 是非阻塞的，不会启动嵌套事件循环导致外层UI卡死
-            show_info(self,info['name'],f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
+            show_silent_info(self,info['name'],f"【此为原说明的简化版，具体请见规则书】\n\n{info['desc']}")
 
     def open_hidden_config(self):
         dlg = HiddenDiceConfigDialog(self.unlocked_hidden_codes, self.enabled_hidden_codes, self)
@@ -707,7 +707,7 @@ class DiceTool(QDialog):
                           border-radius: 15px; padding: 5px 15px; font-size: 10pt; }
             QPushButton:hover { background: #EEE; color: #000; }
         """)
-        self.details_btn.clicked.connect(lambda:show_info(self,"详情",DiceEngine.generate_html_report(self.roll_history, self.current_rolls)))
+        self.details_btn.clicked.connect(lambda:show_silent_info(self,"详情",DiceEngine.generate_html_report(self.roll_history, self.current_rolls)))
         vbox.addWidget(self.details_btn, 0, Qt.AlignmentFlag.AlignCenter)
 
         self.triscendence_widget = QWidget()
@@ -917,7 +917,7 @@ class DiceTool(QDialog):
     def apply_triscendence(self, effect_type: str):
         if effect_type == "more_3":
             self.roll_history["triscendence_choice"] = "增加3的数量(叙事效果)"
-            show_info(self, "叙事", "此为叙事效果")
+            show_silent_info(self, "叙事", "此为叙事效果")
         elif effect_type == "restore_qa":
             qa_data = self.data.get("quality_assurances", {})
             #Qt.WA_DeleteOnClose不应该用在需要后续获取资源的dialog上。python GC会自行处理
@@ -927,7 +927,7 @@ class DiceTool(QDialog):
                 for key, added_val in distribution.items(): qa_data[key]['current'] += added_val
                 self.refresh_qa_combo()
                 self.dataChanged.emit()
-                show_info(self, "成功", "QA点数已回复")
+                show_silent_info(self, "成功", "QA点数已回复")
                 info = ", ".join([f"{QUALITY_ASSURANCES[k]}+{v}" for k, v in distribution.items()])
                 self.roll_history["triscendence_choice"] = f"回复QA ({info})"
             else: return
@@ -935,7 +935,7 @@ class DiceTool(QDialog):
             self.data['commendations'] = self.data.get('commendations', 0) + 3
             self.dataChanged.emit()
             self.roll_history["triscendence_choice"] = "获得3点嘉奖"
-            show_info(self, "成功", "已获得3点嘉奖")
+            show_silent_info(self, "成功", "已获得3点嘉奖")
             
         self.triscendence_widget.setVisible(False)
     

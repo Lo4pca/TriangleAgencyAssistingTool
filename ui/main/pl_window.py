@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QLabel, QPushButton, QHBoxLayout, QSpinBox, QTabWidget,
     QMessageBox, QFileDialog, QTextEdit, QDialog, QFormLayout, 
     QLineEdit, QDialogButtonBox, QGroupBox, QApplication, QComboBox, QStackedWidget,
-    QScrollArea
+    QScrollArea, QMenu
 )
 from PySide6.QtGui import QAction, QDesktopServices
 from PySide6.QtCore import Qt, QTimer, QUrl, QFileInfo, QFile, QIODevice, QSettings
@@ -21,6 +21,7 @@ from ui.character.editor import CharacterEditor
 from ui.tools.dice_tool import DiceTool
 from ui.tools.mission_report import MissionReportDialog
 from ui.common.widgets import TeammateStatusWidget
+from ui.common.dialogs import show_silent_info
 from core.network.client import PLClient
 from core.network.protocol import MsgType
 
@@ -58,6 +59,10 @@ class PLMainWindow(QMainWindow):
         self.players: Dict[str, str] = {}
         self.full_players_list = []
         self.unread_uids = set()
+
+        self._default_layout_state = self.saveState()
+        self._default_geometry = self.saveGeometry()
+        self.restore_window_layout()
     
     # ==========================
     # 网络协议处理与状态同步
@@ -167,6 +172,7 @@ class PLMainWindow(QMainWindow):
     # ==========================================
     def _init_chat_dock(self):
         self.chat_dock = QDockWidget("文字聊天", self)
+        self.chat_dock.setObjectName("PL_text_chat")
         self.chat_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
         container = QWidget()
@@ -190,6 +196,10 @@ class PLMainWindow(QMainWindow):
         self.chat_target_combo.addItem("GM", "GM")
         self.chat_target_combo.currentIndexChanged.connect(self.on_chat_target_changed)
         input_layout.addWidget(self.chat_target_combo)
+
+        self.export_chat_btn = QPushButton("导出")
+        self.export_chat_btn.clicked.connect(self.show_chat_export_menu)
+        input_layout.addWidget(self.export_chat_btn)
         
         self.chat_input = QLineEdit()
         self.chat_input.setPlaceholderText("输入聊天内容...")
@@ -203,6 +213,42 @@ class PLMainWindow(QMainWindow):
         layout.addLayout(input_layout)
         self.chat_dock.setWidget(container)
         self.splitDockWidget(self.log_dock, self.chat_dock, Qt.Horizontal)
+    
+    def show_chat_export_menu(self):
+        menu = QMenu(self)
+        cur_act = menu.addAction("导出当前频道记录")
+        all_act = menu.addAction("导出所有频道记录")
+        
+        action = menu.exec(self.export_chat_btn.mapToGlobal(self.export_chat_btn.rect().bottomLeft()))
+        self.export_chat_history(all_channels=(action == all_act))
+    
+    def export_chat_history(self, all_channels: bool):
+        timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+        
+        if all_channels:
+            content = ""
+            for key, browser in self.chat_browsers.items():
+                content += f"=== 频道: {key} ===\n"
+                content += browser.toPlainText() + "\n\n"
+            default_name = f"{self.game_name}_all_chats_{timestamp}.txt"
+        else:
+            browser = self.chat_stack.currentWidget()
+            key_name = self.chat_target_combo.currentText().replace(" [未读]", "")
+            content = f"=== 频道: {key_name} ===\n" + browser.toPlainText()
+            default_name = f"{self.game_name}_{key_name}_chat_{timestamp}.txt"
+            
+        if not content.strip():
+            show_silent_info(self, "提示", "聊天记录为空，无需导出。")
+            return
+            
+        file_path, _ = QFileDialog.getSaveFileName(self, "导出聊天记录", default_name, "Text Files (*.txt);;All Files (*)")
+        if file_path:
+            try:
+                with open(file_path, "w", encoding="utf-8") as f:
+                    f.write(content)
+                self.append_log(f"聊天记录已导出至: {file_path}")
+            except Exception as e:
+                QMessageBox.critical(self, "导出失败", str(e))
     
     def jump_to_chat(self, target_uid: str):
         """从队友列表点击新消息后，自动跳转并聚焦"""
@@ -270,8 +316,10 @@ class PLMainWindow(QMainWindow):
             if uid: new_map[uid] = entry.get("name", "Unknown")
         self.players = new_map #而players只有uid与name的映射
         #但是似乎将两者合并也可以？
+        my_name = self.character_data.get("name", "Unknown PL")
         for name in self.players.values():
-            self._ensure_chat_browser_for_key(name)
+            if name!="Unknown" and name!=my_name:
+                self._ensure_chat_browser_for_key(name)
 
         self.refresh_teammate_and_dock_ui()
 
@@ -331,6 +379,29 @@ class PLMainWindow(QMainWindow):
             color = "#F3A455"
         html = f"<span style='color:#888;'>[{time_str}]</span> <b style='color:{color};'>{sender}</b>: {text}"
         browser.append(html)
+    
+    # ==========================
+    # 布局持久化
+    # ==========================
+    def save_window_layout(self):
+        settings = QSettings("TA_Assistant", "PL_Layouts")
+        settings.setValue("dock_state", self.saveState())
+        settings.setValue("window_geometry", self.saveGeometry())
+        show_silent_info(self, "布局已保存", "下次启动时将自动恢复目前的窗口布局。")
+
+    def reset_window_layout(self):
+        self.restoreState(self._default_layout_state)
+        self.restoreGeometry(self._default_geometry)
+        settings = QSettings("TA_Assistant", "PL_Layouts")
+        settings.remove("dock_state")
+        settings.remove("window_geometry")
+
+    def restore_window_layout(self):
+        settings = QSettings("TA_Assistant", "PL_Layouts")
+        state = settings.value("dock_state")
+        geo = settings.value("window_geometry")
+        if state: self.restoreState(state)
+        if geo: self.restoreGeometry(geo)
 
     # ==========================
     # UI 初始化
@@ -358,6 +429,14 @@ class PLMainWindow(QMainWindow):
         tools_menu.addAction(report_action)
         
         self.view_menu = menubar.addMenu("视图")
+        self.view_menu.addSeparator()
+        save_layout_act = QAction("保存当前布局", self)
+        save_layout_act.triggered.connect(self.save_window_layout)
+        self.view_menu.addAction(save_layout_act)
+        
+        reset_layout_act = QAction("重置为默认布局", self)
+        reset_layout_act.triggered.connect(self.reset_window_layout)
+        self.view_menu.addAction(reset_layout_act)
 
         net_menu = self.menuBar().addMenu("联机")
         conn_action = QAction("连接到 GM", self)
@@ -367,6 +446,7 @@ class PLMainWindow(QMainWindow):
     def _init_docks(self) -> None:
         # --- 1. Log Dock and Chat Dock ---
         self.log_dock = QDockWidget("游戏日志 & 控制台", self)
+        self.log_dock.setObjectName("PL_public_logs")
         self.log_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         
         log_container = QWidget()
@@ -430,6 +510,7 @@ class PLMainWindow(QMainWindow):
 
         # --- 2. Notes Dock ---
         self.notes_dock = QDockWidget("额外笔记", self)
+        self.notes_dock.setObjectName("PL_notes")
         self.notes_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         notes_container = QWidget()
         notes_layout = QVBoxLayout(notes_container)
@@ -450,6 +531,7 @@ class PLMainWindow(QMainWindow):
 
         # --- 3. Teammate Status Dock ---
         self.teammate_dock = QDockWidget("队友状态", self)
+        self.teammate_dock.setObjectName("PL_teammates")
         self.teammate_dock.setAllowedAreas(Qt.DockWidgetArea.AllDockWidgetAreas)
         self.teammate_dock.setMinimumWidth(120)
         
