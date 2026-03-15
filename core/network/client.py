@@ -14,44 +14,42 @@ class PLClient(QObject):
 
     chaos_updated = Signal(int)
     log_updated = Signal(str)
-    file_received = Signal(str, str) # file_name, base64_content
+    file_received = Signal(str, str)
     loose_ends_updated = Signal(int)
     mission_report_sync = Signal(dict)
+    chat_received = Signal(dict)
+    players_updated = Signal(dict)
 
     def __init__(self, parent: Optional[QObject] = None):
         super().__init__(parent)
-        self.socket = QTcpSocket(self)  # 将 socket 挂载在当前 QObject 树下
-        self.socket.connected.connect(self.connected)
-        self.socket.disconnected.connect(self.disconnected)
-        self.socket.readyRead.connect(self.read_data)
-        self.socket.errorOccurred.connect(self.handle_error)
-
-        self._buffer: bytes = b""
+        self.socket = QTcpSocket(self)
+        self.socket.readyRead.connect(self._on_ready_read)
+        self.socket.connected.connect(self._on_connected)
+        self.socket.disconnected.connect(self._on_disconnected)
+        self.socket.errorOccurred.connect(lambda: self.error_occurred.emit(self.socket.errorString()))
+        self._buffer = b""
 
     def connect_to_host(self, host: str, port: int) -> None:
-        """中止现有连接并尝试连接到新目标"""
-        self.socket.abort()
-        self._buffer = b""
-        self.socket.connectToHost(host, int(port))
-    
-    def disconnect_from_host(self) -> None:
         if self.socket.state() == QAbstractSocket.SocketState.ConnectedState:
             self.socket.disconnectFromHost()
+        self.socket.connectToHost(host, port)
 
-    def handle_error(self) -> None:
-        """处理 Socket 错误，忽略正常的远端关闭"""
-        if self.socket.error() == QAbstractSocket.SocketError.RemoteHostClosedError:
-            return
-        self.error_occurred.emit(self.socket.errorString())
+    def disconnect_from_host(self) -> None:
+        if self.socket.state() != QAbstractSocket.SocketState.UnconnectedState:
+            self.socket.disconnectFromHost()
 
-    def read_data(self) -> None:
-        """读取数据包并处理 TCP 粘包/分包"""
-        new_data = self.socket.readAll().data()
-        self._buffer += new_data
-        
+    def _on_connected(self) -> None:
+        self.connected.emit()
+
+    def _on_disconnected(self) -> None:
+        self.disconnected.emit()
+
+    def _on_ready_read(self) -> None:
+        data = self.socket.readAll().data()
+        self._buffer += data
+
         while len(self._buffer) >= HEADER_SIZE:
             magic_pos = self._buffer.find(MAGIC)
-
             if magic_pos == -1:
                 self._buffer = b""
                 return
@@ -59,26 +57,20 @@ class PLClient(QObject):
                 self._buffer = self._buffer[magic_pos:]
             if len(self._buffer) < HEADER_SIZE:
                 return
-            body_length = struct.unpack(HEADER_FORMAT, self._buffer[MAGIC_LENGTH:HEADER_SIZE])[0]
+            body_len = struct.unpack(HEADER_FORMAT, self._buffer[MAGIC_LENGTH:HEADER_SIZE])[0]
+            if len(self._buffer) < HEADER_SIZE + body_len:
+                break
+            body = self._buffer[HEADER_SIZE: HEADER_SIZE + body_len]
+            self._buffer = self._buffer[HEADER_SIZE + body_len:]
+            self._dispatch_msg(body)
 
-            # 检查缓冲区是否已包含完整的 Body
-            if len(self._buffer) < HEADER_SIZE + body_length:
-                break 
-
-            # 提取 Body 并裁切缓冲区
-            body_data = self._buffer[HEADER_SIZE : HEADER_SIZE + body_length]
-            self._buffer = self._buffer[HEADER_SIZE + body_length :]
-
-            self.process_message(body_data)
-
-    def process_message(self, body_data: bytes) -> None:
-        """解析 JSON Body 并分发给对应的 Qt 信号"""
-        msg = unpack_msg(body_data)
+    def _dispatch_msg(self, body: bytes) -> None:
+        msg = unpack_msg(body)
         if not msg: return
 
         m_type = msg.get("type")
         val = msg.get("data")
-        
+
         if m_type == MsgType.CHAOS_SYNC:
             self.chaos_updated.emit(val)
         elif m_type == MsgType.LOG_SYNC:
@@ -89,6 +81,10 @@ class PLClient(QObject):
             self.loose_ends_updated.emit(val)
         elif m_type == MsgType.MISSION_REPORT:
             self.mission_report_sync.emit(val)
+        elif m_type == MsgType.CHAT:
+            self.chat_received.emit(val)
+        elif m_type == MsgType.PLAYER_LIST:
+            self.players_updated.emit(val)
 
     def send(self, msg_type: MsgType, data: Any) -> None:
         """将数据打包并发送给 GM 服务端"""

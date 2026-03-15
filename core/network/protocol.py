@@ -11,19 +11,17 @@ class MsgType(str, Enum):
     FILE_SEND = "file"              # GM 发送文件给 PL/全部
     LOOSE_ENDS = "loose_ends"       # 松散端数值同步
     MISSION_REPORT = "mission_report" # 任务报告同步
+    CHAT = "chat"                   # 聊天消息
+    PLAYER_LIST = "players"         # 在线玩家列表更新（uid/name 对应的数组）
 
 MAGIC=b"TAMG"
-MAGIC_LENGTH=len(MAGIC)
-HEADER_SIZE = MAGIC_LENGTH+4
-HEADER_FORMAT = '!I'
+MAGIC_LENGTH = len(MAGIC)
+HEADER_FORMAT = "!I"
+HEADER_SIZE = MAGIC_LENGTH + struct.calcsize(HEADER_FORMAT)
 
 def pack_msg(msg_type: MsgType, data: Any) -> bytes:
-    """
-    将消息打包成二进制流。
-    格式：[4字节大端无符号整数表示Body长度] + [JSON 编码的 UTF-8 字节数据]
-    """
-    # 确保传入的是枚举，但序列化时取其字符串值
-    msg_dict = {"type": msg_type.value if isinstance(msg_type, MsgType) else msg_type, "data": data}
+    """打包消息，返回字节流（MAGIC + header + json body）"""
+    msg_dict = {"type": msg_type.value, "data": data}
     json_bytes = json.dumps(msg_dict, ensure_ascii=False).encode('utf-8')
     header = struct.pack(HEADER_FORMAT, len(json_bytes))
     return MAGIC + header + json_bytes

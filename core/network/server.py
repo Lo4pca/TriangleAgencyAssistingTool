@@ -1,5 +1,5 @@
 import struct
-from typing import Dict, Any, Optional, Tuple
+from typing import Dict, Any, Optional, Tuple, List
 from PySide6.QtNetwork import QTcpServer, QHostAddress, QTcpSocket, QAbstractSocket
 from PySide6.QtCore import QObject, Signal
 
@@ -14,6 +14,8 @@ class GMServer(QObject):
     player_connected = Signal(str, str)      # uid, ip
     player_disconnected = Signal(str)        # uid
     mission_report_received = Signal(str, dict) # uid, data
+    chat_received = Signal(dict)             # chat data
+    players_updated = Signal(list)           # list of {"uid":..., "name":...}
 
     def __init__(self, port: int = 12345, parent: Optional[QObject] = None):
         super().__init__(parent)
@@ -28,6 +30,8 @@ class GMServer(QObject):
         """启动 TCP 服务端监听"""
         if not self.server.listen(QHostAddress.SpecialAddress.Any, self.port):
             return False, self.server.errorString()
+        # 广播当前玩家列表（如果有的话）
+        self._broadcast_player_list()
         return True, f"Server listening on port {self.port}"
 
     def stop(self) -> None:
@@ -54,7 +58,10 @@ class GMServer(QObject):
             
             client_socket.readyRead.connect(self.on_ready_read)
             client_socket.disconnected.connect(self.on_disconnected)
+            # 通知上层有新连接
             self.player_connected.emit(uid, peer_ip)
+            # 广播更新后的在线玩家列表
+            self._broadcast_player_list()
 
     def on_disconnected(self) -> None:
         """处理客户端断开，安全回收资源"""
@@ -67,6 +74,8 @@ class GMServer(QObject):
             uid = ctx["uid"]
             del self.clients[sender_socket]
             self.player_disconnected.emit(uid)
+            # 广播更新后的在线玩家列表
+            self._broadcast_player_list()
 
         # 延迟销毁底层 C++ 对象，防止在此事件循环中出错
         sender_socket.deleteLater()
@@ -115,18 +124,50 @@ class GMServer(QObject):
             
         elif m_type == MsgType.LOG_SYNC:
             self.log_received.emit(data)
-            # 日志消息默认为公共消息，需转发给其他 PL
             self.broadcast(MsgType.LOG_SYNC, data, exclude=sender_socket)
             
         elif m_type == MsgType.SHEET_UPDATE:
             new_name = data.get("name", "Unknown")
             sheet_content = data.get("sheet", {})
             self.clients[sender_socket]["name"] = new_name
+
+            qas = sheet_content.get("quality_assurances", {})
+            public_status = {
+                "qas": {k: f"{v.get('current', 0)}/{v.get('max', 0)}" for k, v in qas.items()},
+                "anomaly": sheet_content.get("anomaly", "未知的异常能力"),
+                "reality": sheet_content.get("reality","未知的现实身份"),
+                "competency": sheet_content.get("competency","未知的职能")
+            }
+            self.clients[sender_socket]["public_status"] = public_status
             self.sheet_received.emit(sender_uid, new_name, sheet_content)
+            # 广播最新在线玩家列表（用于 PL 更新下拉列表）
+            self._broadcast_player_list()
         
         elif m_type == MsgType.MISSION_REPORT:
             self.mission_report_received.emit(sender_uid, data)
-    
+        
+        elif m_type == MsgType.CHAT:
+            target = data.get("target", "ALL")
+            data["from_uid"] = sender_uid
+            if target != "GM" and target!='ALL':
+                self.send_to(target, MsgType.CHAT, data)
+                return
+            if target == "ALL":
+                self.broadcast(MsgType.CHAT, data, exclude=sender_socket)
+            self.chat_received.emit(data)
+
+    def _broadcast_player_list(self) -> None:
+        """将当前在线玩家 uid/name 列表广播给所有连接的 PL"""
+        lst: List[Dict[str, str]] = []
+        for ctx in self.clients.values():
+            lst.append({
+                "uid": ctx.get("uid"), 
+                "name": ctx.get("name", "Unknown"),
+                "public_status": ctx.get("public_status", {})
+            })
+        payload = {"players": lst}
+        self.broadcast(MsgType.PLAYER_LIST, payload)
+
     def broadcast(self, msg_type: MsgType, data: Any, exclude: Optional[QTcpSocket] = None) -> None:
         """向指定的或所有的活跃客户端广播消息"""
         payload = pack_msg(msg_type, data)
