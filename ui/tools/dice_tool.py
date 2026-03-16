@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 )
 from PySide6.QtCore import Qt, Signal
 
-from ui.common.dialogs import show_silent_info, show_warning
+from ui.common.dialogs import show_silent_info
 from models.static_data import QUALITY_ASSURANCES, HIDDEN_DICE_DB
 
 # ==========================================
@@ -268,7 +268,7 @@ class HiddenDiceConfigDialog(QDialog):
             else:
                 show_silent_info(self, "提示", "该内容已解锁")
         else:
-            show_warning(self, "拒绝访问", "无效的代码")
+            QMessageBox.warning(self, "拒绝访问", "无效的代码")
 
     def refresh_list(self):
         self.list_widget.clear()
@@ -907,9 +907,11 @@ class DiceTool(QDialog):
             qa_data[selected_key]['current'] -= 1
             self.refresh_qa_combo()
             self.dataChanged.emit()
-            
+
             self.current_rolls[index] = 3
-            if self.dice_buttons[index].is_burned: self.roll_history['burned_indices'].remove(index)
+            if self.dice_buttons[index].is_burned:
+                self.roll_history['burned_indices'].remove(index)
+                self.roll_history['total_burnout']-=1
             self.dice_buttons[index].update_state(3, False)
             self.roll_history["modifications"].append(f"消耗 {item} 将第{index+1}枚骰子改为3")
             self.calculate_result()

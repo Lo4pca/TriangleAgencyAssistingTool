@@ -24,6 +24,11 @@
     - 填写任务报告
     - 文字聊天系统
 
+- 文字聊天系统的演示见 https://github.com/Lo4pca/TriangleAgencyAssistingTool/issues/2#issuecomment-4067407515
+- 掷骰工具的演示见 https://github.com/Lo4pca/TriangleAgencyAssistingTool/issues/2#issuecomment-4067601886
+- 角色卡编辑器的演示见 https://github.com/Lo4pca/TriangleAgencyAssistingTool/issues/2#issuecomment-4067636861
+- 天气系统的演示见 https://github.com/Lo4pca/TriangleAgencyAssistingTool/issues/2#issuecomment-4067683393
+
 推荐使用[gsocket](https://github.com/hackerschoice/gsocket)实现联机（我怎么现在才发现这个好东西），但任何端口转发服务配置好后都能用
 
 游戏的相关文本来源于网络
@@ -32,7 +37,7 @@
 
 如果有python和pyside6库的话直接运行`app.py`即可
 
-[releases](https://github.com/Lo4pca/TriangleAgencyAssistingTool/releases)下有macOS（m1）和windows 10(amd64)下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行
+[releases](https://github.com/Lo4pca/TriangleAgencyAssistingTool/releases/latest)下有macOS（m1）和windows 10(amd64)下使用[pyinstaller](https://github.com/pyinstaller/pyinstaller)打包的程序，不需要安装任何依赖项即可运行
 
 软件会在安装目录下创建一个`data`文件夹，用于存储角色卡等数据
 
